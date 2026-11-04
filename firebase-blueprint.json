@@ -1,0 +1,267 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile containing joined group IDs and preferences",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique Google user ID"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the user"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of user"
+        },
+        "activeGroupId": {
+          "type": "string",
+          "description": "Currently active family group ID"
+        },
+        "joinedGroupIds": {
+          "type": "array",
+          "description": "List of group IDs the user belongs to"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp via server timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp via server timestamp"
+        }
+      },
+      "required": ["userId", "displayName", "createdAt", "updatedAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A shared family maintenance group",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique group ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the group, e.g. Familie Hoetger"
+        },
+        "code": {
+          "type": "string",
+          "description": "Shareable family sync code, e.g. FAM-8392"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the creator/admin"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "UIDs of all coupled family members"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "name", "code", "ownerId", "memberUids", "createdAt", "updatedAt"]
+    },
+    "GroupCode": {
+      "title": "GroupCode",
+      "description": "Code lookup entry mapping sync code to groupId",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Uppercase sync code"
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Target group ID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Group display name"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["code", "groupId", "name", "createdAt"]
+    },
+    "Machine": {
+      "title": "Machine",
+      "description": "Machine, vehicle, or equipment managed within a group",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique machine ID"
+        },
+        "groupId": {
+          "type": "string",
+          "description": "ID of parent group"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name or designation of the machine"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category: Auto, Rasenmäher, Rauchmelder, Garten, Haus, etc."
+        },
+        "groupTag": {
+          "type": "string",
+          "description": "Dashboard grouping tag, e.g. Garage & KFZ, Garten, Haus"
+        },
+        "location": {
+          "type": "string",
+          "description": "Physical location or room"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes or model details"
+        },
+        "nextDueDate": {
+          "type": "string",
+          "description": "Next scheduled maintenance date (YYYY-MM-DD) or empty"
+        },
+        "nextDueMaintenance": {
+          "type": "string",
+          "description": "Description of next due maintenance"
+        },
+        "lastMaintenanceDate": {
+          "type": "string",
+          "description": "Date of latest completed maintenance"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "List of planned maintenance tasks (id, title, dueDate, intervalMonths, notes)"
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized member UIDs for flat authorization"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of creator"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "groupId", "name", "category", "groupTag", "memberUids", "createdBy", "createdAt", "updatedAt"]
+    },
+    "MaintenanceEntry": {
+      "title": "MaintenanceEntry",
+      "description": "Log of completed maintenance or scheduled future service",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique entry ID"
+        },
+        "groupId": {
+          "type": "string",
+          "description": "Parent group ID"
+        },
+        "machineId": {
+          "type": "string",
+          "description": "ID of related machine"
+        },
+        "machineName": {
+          "type": "string",
+          "description": "Name of machine"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title or type of maintenance, e.g. Ölwechsel, Batterietest"
+        },
+        "type": {
+          "type": "string",
+          "description": "Maintenance type: Inspektion, Verschleißteil, Reinigung, Prüfung, Reparatur"
+        },
+        "completedDate": {
+          "type": "string",
+          "description": "Execution date (YYYY-MM-DD)"
+        },
+        "nextScheduledDate": {
+          "type": "string",
+          "description": "Optional rescheduled follow-up date (YYYY-MM-DD)"
+        },
+        "performedBy": {
+          "type": "string",
+          "description": "Person or service provider who performed maintenance"
+        },
+        "cost": {
+          "type": "number",
+          "description": "Cost in EUR"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Detailed remarks, parts used, etc."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized member UIDs for flat authorization"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of creator"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "groupId", "machineId", "machineName", "title", "completedDate", "memberUids", "createdBy", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile with joined group tracking"
+    },
+    "/groups/{groupId}": {
+      "schema": "Group",
+      "description": "Family maintenance sync group with members"
+    },
+    "/group_codes/{code}": {
+      "schema": "GroupCode",
+      "description": "Public invite directory mapping family sync codes to group IDs"
+    },
+    "/groups/{groupId}/machines/{machineId}": {
+      "schema": "Machine",
+      "description": "Equipment, machines and vehicles managed by the group"
+    },
+    "/groups/{groupId}/maintenances/{maintenanceId}": {
+      "schema": "MaintenanceEntry",
+      "description": "Maintenance history log and scheduled upcoming entries"
+    }
+  }
+}
