@@ -13,6 +13,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -150,19 +151,29 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
         // Update user profile activeGroupId and joinedGroupIds
         val userDoc = db.collection("users").document(uid).get().await()
-        val currentJoined = userDoc.get("joinedGroupIds") as? List<*> ?: emptyList<String>()
-        val updatedJoined = (currentJoined.mapNotNull { it?.toString() } + groupId).distinct()
-        db.collection("users").document(uid).set(
-            mapOf(
-                "userId" to uid,
-                "displayName" to (userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "Familienmitglied"),
-                "email" to (auth.currentUser?.email ?: ""),
-                "activeGroupId" to groupId,
-                "joinedGroupIds" to updatedJoined,
-                "createdAt" to (userDoc.getTimestamp("createdAt") ?: FieldValue.serverTimestamp()),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-        ).await()
+        if (userDoc.exists()) {
+            val currentJoined = userDoc.get("joinedGroupIds") as? List<*> ?: emptyList<String>()
+            val updatedJoined = (currentJoined.mapNotNull { it?.toString() } + groupId).distinct()
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "activeGroupId" to groupId,
+                    "joinedGroupIds" to updatedJoined,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } else {
+            db.collection("users").document(uid).set(
+                mapOf(
+                    "userId" to uid,
+                    "displayName" to (auth.currentUser?.displayName ?: "Familienmitglied"),
+                    "email" to (auth.currentUser?.email ?: ""),
+                    "activeGroupId" to groupId,
+                    "joinedGroupIds" to listOf(groupId),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
 
         FamilyGroup(
             id = groupId,
@@ -292,19 +303,29 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
         // Update user profile
         val userDoc = db.collection("users").document(uid).get().await()
-        val currentJoined = (userDoc.get("joinedGroupIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-        val updatedJoined = (currentJoined + targetGroupId).distinct()
-        db.collection("users").document(uid).set(
-            mapOf(
-                "userId" to uid,
-                "displayName" to (userDoc.getString("displayName") ?: auth.currentUser?.displayName ?: "Familienmitglied"),
-                "email" to (auth.currentUser?.email ?: ""),
-                "activeGroupId" to targetGroupId,
-                "joinedGroupIds" to updatedJoined,
-                "createdAt" to (userDoc.getTimestamp("createdAt") ?: FieldValue.serverTimestamp()),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-        ).await()
+        if (userDoc.exists()) {
+            val currentJoined = (userDoc.get("joinedGroupIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            val updatedJoined = (currentJoined + targetGroupId).distinct()
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "activeGroupId" to targetGroupId,
+                    "joinedGroupIds" to updatedJoined,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        } else {
+            db.collection("users").document(uid).set(
+                mapOf(
+                    "userId" to uid,
+                    "displayName" to (auth.currentUser?.displayName ?: "Familienmitglied"),
+                    "email" to (auth.currentUser?.email ?: ""),
+                    "activeGroupId" to targetGroupId,
+                    "joinedGroupIds" to listOf(targetGroupId),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
 
         val groupObj = groupDoc.toObject(FamilyGroup::class.java)
         groupObj?.copy(memberUids = updatedMembers) ?: FamilyGroup(id = targetGroupId, name = codeDoc.getString("name") ?: "", code = cleanCode, memberUids = updatedMembers)
@@ -317,10 +338,8 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
             close()
             return@callbackFlow
         }
-        val uid = requireUserId()
         val query = db.collection("groups").document(groupId)
             .collection("machines")
-            .whereArrayContains("memberUids", uid)
 
         val registration = query.addSnapshotListener { snapshot, error ->
             if (error != null) {
@@ -407,10 +426,8 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
             close()
             return@callbackFlow
         }
-        val uid = requireUserId()
-        var query = db.collection("groups").document(groupId)
+        var query: Query = db.collection("groups").document(groupId)
             .collection("maintenances")
-            .whereArrayContains("memberUids", uid)
 
         if (!machineId.isNullOrBlank()) {
             query = query.whereEqualTo("machineId", machineId)
@@ -501,10 +518,8 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
         val groupName = groupDoc.getString("name") ?: "WartungsPlaner"
         val groupCode = groupDoc.getString("code") ?: ""
 
-        val machinesSnapshot = db.collection("groups").document(groupId).collection("machines")
-            .whereArrayContains("memberUids", uid).get().await()
-        val maintenancesSnapshot = db.collection("groups").document(groupId).collection("maintenances")
-            .whereArrayContains("memberUids", uid).get().await()
+        val machinesSnapshot = db.collection("groups").document(groupId).collection("machines").get().await()
+        val maintenancesSnapshot = db.collection("groups").document(groupId).collection("maintenances").get().await()
 
         val jsonRoot = JSONObject()
         jsonRoot.put("version", 1)

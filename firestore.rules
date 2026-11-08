@@ -47,6 +47,12 @@ service cloud.firestore {
              data.name is string && data.name.size() <= 100;
     }
 
+    function isGroupMember(groupId) {
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/groups/$(groupId)) &&
+             (request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids);
+    }
+
     function isValidMachine(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.groupId is string && data.groupId.size() <= 128 &&
@@ -59,7 +65,7 @@ service cloud.firestore {
              (!('nextDueMaintenance' in data) || (data.nextDueMaintenance is string && data.nextDueMaintenance.size() <= 200)) &&
              (!('lastMaintenanceDate' in data) || (data.lastMaintenanceDate is string && data.lastMaintenanceDate.size() <= 30)) &&
              (!('tasks' in data) || (data.tasks is list && data.tasks.size() <= 50)) &&
-             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 30 &&
+             (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50)) &&
              data.createdBy is string && data.createdBy.size() <= 128;
     }
 
@@ -75,7 +81,7 @@ service cloud.firestore {
              (!('performedBy' in data) || (data.performedBy is string && data.performedBy.size() <= 100)) &&
              (!('cost' in data) || (data.cost is number && data.cost >= 0)) &&
              (!('notes' in data) || (data.notes is string && data.notes.size() <= 3000)) &&
-             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 30 &&
+             (!('memberUids' in data) || (data.memberUids is list && data.memberUids.size() <= 50)) &&
              data.createdBy is string && data.createdBy.size() <= 128;
     }
 
@@ -103,7 +109,9 @@ service cloud.firestore {
 
     // Family Groups
     match /groups/{groupId} {
-      allow get: if isSignedIn() && (resource == null || (request.auth.uid in resource.data.memberUids));
+      // Any signed-in user can get a group by direct ID (needed to lookup group info when joining via sync code)
+      allow get: if isSignedIn();
+      // Only members can list their groups
       allow list: if isSignedIn() && (request.auth.uid in resource.data.memberUids);
 
       allow create: if isSignedIn() &&
@@ -124,19 +132,19 @@ service cloud.firestore {
         (incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
          incoming().memberUids.hasAll(existing().memberUids) &&
-         (request.auth.uid in incoming().memberUids) &&
-         incoming().memberUids.size() == existing().memberUids.size() + 1)
+         (request.auth.uid in incoming().memberUids))
       );
 
       allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
 
       // Machines subcollection
       match /machines/{machineId} {
-        allow get: if isSignedIn() && (resource == null || (request.auth.uid in resource.data.memberUids));
-        allow list: if isSignedIn() && (request.auth.uid in resource.data.memberUids);
+        allow get, list: if isSignedIn() && (
+          isGroupMember(groupId) || (resource != null && (request.auth.uid in resource.data.memberUids))
+        );
 
         allow create: if isSignedIn() &&
-                         (request.auth.uid in incoming().memberUids) &&
+                         isGroupMember(groupId) &&
                          incoming().createdBy == request.auth.uid &&
                          incoming().groupId == groupId &&
                          incoming().createdAt is timestamp &&
@@ -144,26 +152,25 @@ service cloud.firestore {
                          isValidMachine(incoming());
 
         allow update: if isSignedIn() &&
-                         (request.auth.uid in existing().memberUids) &&
-                         (request.auth.uid in incoming().memberUids) &&
+                         isGroupMember(groupId) &&
                          incoming().groupId == existing().groupId &&
-                         incoming().createdBy == existing().createdBy &&
                          incoming().createdAt == existing().createdAt &&
                          incoming().updatedAt is timestamp &&
                          incoming().updatedAt <= request.time &&
                          isValidMachine(incoming()) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'groupTag', 'location', 'notes', 'nextDueDate', 'nextDueMaintenance', 'lastMaintenanceDate', 'tasks', 'memberUids', 'updatedAt']);
 
-        allow delete: if isSignedIn() && (request.auth.uid in existing().memberUids);
+        allow delete: if isSignedIn() && isGroupMember(groupId);
       }
 
       // Maintenances subcollection
       match /maintenances/{maintenanceId} {
-        allow get: if isSignedIn() && (resource == null || (request.auth.uid in resource.data.memberUids));
-        allow list: if isSignedIn() && (request.auth.uid in resource.data.memberUids);
+        allow get, list: if isSignedIn() && (
+          isGroupMember(groupId) || (resource != null && (request.auth.uid in resource.data.memberUids))
+        );
 
         allow create: if isSignedIn() &&
-                         (request.auth.uid in incoming().memberUids) &&
+                         isGroupMember(groupId) &&
                          incoming().createdBy == request.auth.uid &&
                          incoming().groupId == groupId &&
                          incoming().createdAt is timestamp &&
@@ -171,24 +178,22 @@ service cloud.firestore {
                          isValidMaintenance(incoming());
 
         allow update: if isSignedIn() &&
-                         (request.auth.uid in existing().memberUids) &&
-                         (request.auth.uid in incoming().memberUids) &&
+                         isGroupMember(groupId) &&
                          incoming().groupId == existing().groupId &&
                          incoming().machineId == existing().machineId &&
-                         incoming().createdBy == existing().createdBy &&
                          incoming().createdAt == existing().createdAt &&
                          incoming().updatedAt is timestamp &&
                          incoming().updatedAt <= request.time &&
                          isValidMaintenance(incoming()) &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['machineName', 'title', 'type', 'completedDate', 'nextScheduledDate', 'performedBy', 'cost', 'notes', 'memberUids', 'updatedAt']);
 
-        allow delete: if isSignedIn() && (request.auth.uid in existing().memberUids);
+        allow delete: if isSignedIn() && isGroupMember(groupId);
       }
     }
 
     // Public invite codes directory
     match /group_codes/{code} {
-      allow get: if isSignedIn() && isValidId(code);
+      allow get: if isSignedIn();
       allow list: if false; // Disallow scraping entire code database
 
       allow create: if isSignedIn() &&
