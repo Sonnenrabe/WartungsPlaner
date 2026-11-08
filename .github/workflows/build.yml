@@ -20,9 +20,7 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
       - name: Debug-Keystore schreiben
-        run: |
-          mkdir -p ~/.android
-          echo "$DEBUG_KEYSTORE" | base64 -d > ~/.android/debug.keystore
+        run: echo "$DEBUG_KEYSTORE" | base64 -d > "$GITHUB_WORKSPACE/debug.keystore"
         env:
           DEBUG_KEYSTORE: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
       - run: gradle assembleDebug
