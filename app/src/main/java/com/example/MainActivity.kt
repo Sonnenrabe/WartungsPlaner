@@ -223,6 +223,17 @@ fun MainAppContent(
                             nextTaskTitle = nextTaskTitle
                         )
                     },
+                    onRecordCompletedMaintenance = { title, completedDate, performedBy, notes, rescheduleDate, intervalMonths ->
+                        viewModel.recordCompletedMaintenanceDirectly(
+                            machineId = selectedMachine.id,
+                            title = title,
+                            completedDate = completedDate,
+                            performedBy = performedBy,
+                            notes = notes,
+                            rescheduleDate = rescheduleDate,
+                            intervalMonths = intervalMonths
+                        )
+                    },
                     onAddMaintenanceManual = {
                         viewModel.preselectedMachineForMaintenance.value = selectedMachine
                         viewModel.showMaintenanceDialog.value = true
@@ -266,6 +277,7 @@ fun MainAppContent(
                     onManageGroupClick = { viewModel.showGroupDialog.value = true },
                     onManageDeviceGroupsClick = { viewModel.showManageDeviceGroupsDialog.value = true },
                     onOpenBackupClick = { viewModel.showBackupDialog.value = true },
+                    onUpdateDisplayName = { newName -> viewModel.updateDisplayName(newName) },
                     onSignOutClick = onSignOut
                 )
             }
@@ -307,7 +319,7 @@ fun MainAppContent(
         MaintenanceDialog(
             machines = machines,
             preselectedMachine = preselectedMachineForMaintenance,
-            defaultPerformerName = Firebase.auth.currentUser?.displayName ?: "Ich",
+            defaultPerformerName = userProfile?.displayName?.ifBlank { "Ich" } ?: "Ich",
             onDismiss = {
                 viewModel.showMaintenanceDialog.value = false
                 viewModel.preselectedMachineForMaintenance.value = null
@@ -323,6 +335,7 @@ fun MainAppContent(
         GroupManagementDialog(
             activeGroup = activeGroup,
             userGroups = userGroups,
+            currentUserId = viewModel.currentUser?.uid,
             onSelectGroup = { groupId ->
                 viewModel.switchActiveGroup(groupId)
                 viewModel.showGroupDialog.value = false
@@ -332,6 +345,12 @@ fun MainAppContent(
             },
             onJoinGroup = { code ->
                 viewModel.joinGroupByCode(code)
+            },
+            onDeleteGroup = { groupId ->
+                viewModel.deleteGroup(groupId)
+            },
+            onLeaveGroup = { groupId ->
+                viewModel.leaveGroup(groupId)
             },
             onDismiss = { viewModel.showGroupDialog.value = false }
         )

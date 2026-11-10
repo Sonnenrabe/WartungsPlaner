@@ -132,7 +132,13 @@ service cloud.firestore {
         (incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
          incoming().memberUids.hasAll(existing().memberUids) &&
-         (request.auth.uid in incoming().memberUids))
+         (request.auth.uid in incoming().memberUids)) ||
+        // Action 4: Member leaves group
+        (incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+         existing().memberUids.hasAll(incoming().memberUids) &&
+         !(request.auth.uid in incoming().memberUids) &&
+         (request.auth.uid in existing().memberUids))
       );
 
       allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
@@ -201,9 +207,10 @@ service cloud.firestore {
                        incoming().createdAt <= request.time &&
                        isValidGroupCode(incoming());
 
-      allow update, delete: if isSignedIn() &&
-                               exists(/databases/$(database)/documents/groups/$(existing().groupId)) &&
-                               get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid;
+      allow update, delete: if isSignedIn() && (
+        !exists(/databases/$(database)/documents/groups/$(existing().groupId)) ||
+        get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid
+      );
     }
   }
 }

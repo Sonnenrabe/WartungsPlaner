@@ -331,6 +331,93 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
         groupObj?.copy(memberUids = updatedMembers) ?: FamilyGroup(id = targetGroupId, name = codeDoc.getString("name") ?: "", code = cleanCode, memberUids = updatedMembers)
     }.onFailure { handleFirestoreError(it as Exception, OperationType.UPDATE, "groups/join") }
 
+    suspend fun deleteGroup(groupId: String): Result<Unit> = runCatching {
+        val uid = requireUserId()
+        val groupDocRef = db.collection("groups").document(groupId)
+        val groupDoc = groupDocRef.get().await()
+        if (!groupDoc.exists()) return@runCatching Unit
+
+        val ownerId = groupDoc.getString("ownerId") ?: ""
+        val code = groupDoc.getString("code") ?: ""
+
+        if (ownerId != uid) {
+            throw IllegalStateException("Nur der Ersteller der Gruppe kann diese endgültig löschen. Du kannst die Gruppe aber verlassen.")
+        }
+
+        // 1. Delete code lookup
+        if (code.isNotBlank()) {
+            try {
+                db.collection("group_codes").document(code).delete().await()
+            } catch (_: Exception) {}
+        }
+
+        // 2. Delete machines in group
+        val machines = db.collection("groups").document(groupId).collection("machines").get().await()
+        for (doc in machines.documents) {
+            doc.reference.delete().await()
+        }
+
+        // 3. Delete maintenances in group
+        val maintenances = db.collection("groups").document(groupId).collection("maintenances").get().await()
+        for (doc in maintenances.documents) {
+            doc.reference.delete().await()
+        }
+
+        // 4. Delete group document
+        groupDocRef.delete().await()
+
+        // 5. Update user profile
+        val userDoc = db.collection("users").document(uid).get().await()
+        if (userDoc.exists()) {
+            val currentJoined = (userDoc.get("joinedGroupIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            val updatedJoined = currentJoined.filterNot { it == groupId }
+            val activeGroupId = userDoc.getString("activeGroupId") ?: ""
+            val newActive = if (activeGroupId == groupId) updatedJoined.firstOrNull() ?: "" else activeGroupId
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "joinedGroupIds" to updatedJoined,
+                    "activeGroupId" to newActive,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+        Unit
+    }.onFailure { handleFirestoreError(it as Exception, OperationType.DELETE, "groups/$groupId") }
+
+    suspend fun leaveGroup(groupId: String): Result<Unit> = runCatching {
+        val uid = requireUserId()
+        val groupDocRef = db.collection("groups").document(groupId)
+        val groupDoc = groupDocRef.get().await()
+        if (!groupDoc.exists()) return@runCatching Unit
+
+        val currentMembers = (groupDoc.get("memberUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+        val nextMembers = currentMembers.filterNot { it == uid }
+
+        groupDocRef.update(
+            mapOf(
+                "memberUids" to nextMembers,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+
+        // Update user profile
+        val userDoc = db.collection("users").document(uid).get().await()
+        if (userDoc.exists()) {
+            val currentJoined = (userDoc.get("joinedGroupIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+            val updatedJoined = currentJoined.filterNot { it == groupId }
+            val activeGroupId = userDoc.getString("activeGroupId") ?: ""
+            val newActive = if (activeGroupId == groupId) updatedJoined.firstOrNull() ?: "" else activeGroupId
+            db.collection("users").document(uid).update(
+                mapOf(
+                    "joinedGroupIds" to updatedJoined,
+                    "activeGroupId" to newActive,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+        Unit
+    }.onFailure { handleFirestoreError(it as Exception, OperationType.UPDATE, "groups/$groupId/leave") }
+
     // --- MACHINES ---
     fun observeMachines(groupId: String): Flow<List<Machine>> = callbackFlow {
         if (groupId.isBlank()) {

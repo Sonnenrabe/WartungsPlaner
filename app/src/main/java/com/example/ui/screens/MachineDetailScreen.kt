@@ -93,6 +93,7 @@ fun MachineDetailScreen(
     onUpdateTask: (MaintenanceTask) -> Unit,
     onDeleteTask: (String) -> Unit,
     onCompleteTask: (task: MaintenanceTask, completedDate: String, performedBy: String, notes: String, nextScheduledDate: String?, nextTaskTitle: String?) -> Unit,
+    onRecordCompletedMaintenance: (title: String, completedDate: String, performedBy: String, notes: String, rescheduleDate: String?, intervalMonths: Long) -> Unit,
     onAddMaintenanceManual: () -> Unit,
     onDeleteMaintenance: (String) -> Unit
 ) {
@@ -109,6 +110,7 @@ fun MachineDetailScreen(
     var viewingMaintenanceEntry by remember { mutableStateOf<MaintenanceEntry?>(null) }
 
     var showTaskDialog by remember { mutableStateOf(false) }
+    var taskDialogInitiallyCompleted by remember { mutableStateOf(false) }
     var taskToEdit by remember { mutableStateOf<MaintenanceTask?>(null) }
     var taskToComplete by remember { mutableStateOf<MaintenanceTask?>(null) }
 
@@ -359,19 +361,38 @@ fun MachineDetailScreen(
                                     )
                                 }
 
-                                OutlinedButton(
-                                    onClick = {
-                                        taskToEdit = null
-                                        showTaskDialog = true
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier
-                                        .height(34.dp)
-                                        .testTag("add_task_button")
-                                ) {
-                                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Aufgabe", fontSize = 12.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilledTonalButton(
+                                        onClick = {
+                                            taskToEdit = null
+                                            taskDialogInitiallyCompleted = true
+                                            showTaskDialog = true
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .testTag("record_completed_maintenance_button")
+                                    ) {
+                                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Erledigt", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            taskToEdit = null
+                                            taskDialogInitiallyCompleted = false
+                                            showTaskDialog = true
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .testTag("add_task_button")
+                                    ) {
+                                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Planen", fontSize = 11.sp)
+                                    }
                                 }
                             }
                         }
@@ -849,9 +870,12 @@ fun MachineDetailScreen(
     if (showTaskDialog) {
         MaintenanceTaskDialog(
             taskToEdit = taskToEdit,
+            defaultPerformerName = defaultPerformerName,
+            initiallyCompleted = taskDialogInitiallyCompleted,
             onDismiss = {
                 showTaskDialog = false
                 taskToEdit = null
+                taskDialogInitiallyCompleted = false
             },
             onSave = { task ->
                 showTaskDialog = false
@@ -861,6 +885,13 @@ fun MachineDetailScreen(
                     onUpdateTask(task)
                 }
                 taskToEdit = null
+                taskDialogInitiallyCompleted = false
+            },
+            onSaveCompleted = { title, completedDate, performedBy, notes, rescheduleDate, intervalMonths ->
+                showTaskDialog = false
+                taskToEdit = null
+                taskDialogInitiallyCompleted = false
+                onRecordCompletedMaintenance(title, completedDate, performedBy, notes, rescheduleDate, intervalMonths)
             }
         )
     }

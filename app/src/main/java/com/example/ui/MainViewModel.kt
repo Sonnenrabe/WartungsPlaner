@@ -205,6 +205,70 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
         }
     }
 
+    fun deleteGroup(groupId: String) {
+        viewModelScope.launch {
+            isLoading.value = true
+            val result = repository.deleteGroup(groupId)
+            isLoading.value = false
+            result.onSuccess {
+                notification.value = UiNotification("Gruppe erfolgreich gelöscht.")
+                if (_activeGroup.value?.id == groupId) {
+                    val nextGroup = _userGroups.value.firstOrNull { it.id != groupId }
+                    if (nextGroup != null) {
+                        switchActiveGroup(nextGroup.id)
+                    } else {
+                        _activeGroup.value = null
+                        _machines.value = emptyList()
+                        _maintenances.value = emptyList()
+                    }
+                }
+            }.onFailure { e ->
+                notification.value = UiNotification("Fehler beim Löschen: ${e.localizedMessage}", isError = true)
+            }
+        }
+    }
+
+    fun leaveGroup(groupId: String) {
+        viewModelScope.launch {
+            isLoading.value = true
+            val result = repository.leaveGroup(groupId)
+            isLoading.value = false
+            result.onSuccess {
+                notification.value = UiNotification("Gruppe verlassen.")
+                if (_activeGroup.value?.id == groupId) {
+                    val nextGroup = _userGroups.value.firstOrNull { it.id != groupId }
+                    if (nextGroup != null) {
+                        switchActiveGroup(nextGroup.id)
+                    } else {
+                        _activeGroup.value = null
+                        _machines.value = emptyList()
+                        _maintenances.value = emptyList()
+                    }
+                }
+            }.onFailure { e ->
+                notification.value = UiNotification("Fehler beim Verlassen: ${e.localizedMessage}", isError = true)
+            }
+        }
+    }
+
+    fun updateDisplayName(newName: String) {
+        val uid = auth.currentUser?.uid ?: return
+        val cleanName = newName.trim()
+        if (cleanName.isBlank()) return
+        viewModelScope.launch {
+            isLoading.value = true
+            val current = _userProfile.value ?: UserProfile(userId = uid, email = auth.currentUser?.email ?: "")
+            val updated = current.copy(displayName = cleanName)
+            val result = repository.saveUserProfile(updated)
+            isLoading.value = false
+            result.onSuccess {
+                notification.value = UiNotification("Dein Name wurde in '$cleanName' geändert!")
+            }.onFailure { e ->
+                notification.value = UiNotification("Fehler beim Speichern: ${e.localizedMessage}", isError = true)
+            }
+        }
+    }
+
     fun addDeviceGroup(name: String) {
         val groupId = _activeGroup.value?.id ?: return
         viewModelScope.launch {
@@ -380,6 +444,63 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
             repository.saveMachine(groupId, updatedMachine)
             isLoading.value = false
             notification.value = UiNotification("Wartung '${task.title}' als erledigt protokolliert!")
+        }
+    }
+
+    fun recordCompletedMaintenanceDirectly(
+        machineId: String,
+        title: String,
+        completedDate: String,
+        performedBy: String,
+        notes: String,
+        rescheduleDate: String?,
+        intervalMonths: Long
+    ) {
+        val groupId = _activeGroup.value?.id ?: return
+        val currentMachine = _machines.value.find { it.id == machineId } ?: return
+
+        val entry = MaintenanceEntry(
+            groupId = groupId,
+            machineId = machineId,
+            machineName = currentMachine.name,
+            title = title.trim(),
+            type = "Wartung",
+            completedDate = completedDate.trim(),
+            nextScheduledDate = rescheduleDate?.trim() ?: "",
+            performedBy = performedBy.trim(),
+            cost = 0.0,
+            notes = notes.trim()
+        )
+
+        val updatedTasks = if (!rescheduleDate.isNullOrBlank()) {
+            val nextTask = com.example.data.model.MaintenanceTask(
+                id = java.util.UUID.randomUUID().toString(),
+                title = title.trim(),
+                dueDate = rescheduleDate.trim(),
+                intervalMonths = intervalMonths,
+                notes = "",
+                isCompleted = false
+            )
+            currentMachine.tasks + nextTask
+        } else {
+            currentMachine.tasks
+        }
+
+        val (earliestDate, earliestTask) = calculateEarliestTask(updatedTasks)
+
+        val updatedMachine = currentMachine.copy(
+            tasks = updatedTasks,
+            lastMaintenanceDate = completedDate.trim(),
+            nextDueDate = earliestDate ?: currentMachine.nextDueDate,
+            nextDueMaintenance = earliestTask ?: currentMachine.nextDueMaintenance
+        )
+
+        viewModelScope.launch {
+            isLoading.value = true
+            repository.saveMaintenance(groupId, entry, null, null)
+            repository.saveMachine(groupId, updatedMachine)
+            isLoading.value = false
+            notification.value = UiNotification("Erledigte Wartung '$title' erfolgreich dokumentiert!")
         }
     }
 

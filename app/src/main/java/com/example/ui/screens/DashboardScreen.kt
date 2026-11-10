@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
@@ -96,6 +97,7 @@ import com.example.data.model.Machine
 import com.example.data.model.UserProfile
 import com.example.ui.SortOption
 import com.example.ui.StatusFilter
+import com.example.ui.components.EditProfileDialog
 import com.example.ui.components.MachineCard
 import com.example.ui.theme.StatusDueSoon
 import com.example.ui.theme.StatusOverdue
@@ -134,6 +136,7 @@ fun DashboardScreen(
     onManageGroupClick: () -> Unit,
     onManageDeviceGroupsClick: () -> Unit,
     onOpenBackupClick: () -> Unit,
+    onUpdateDisplayName: (String) -> Unit,
     onSignOutClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -142,6 +145,7 @@ fun DashboardScreen(
 
     var isSearchExpanded by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
 
     // Collapsed state for sections in grouped view
     val collapsedSections = remember { mutableStateMapOf<String, Boolean>() }
@@ -208,17 +212,35 @@ fun DashboardScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "WartungsPlaner",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text(
-                                text = userProfile?.displayName?.ifBlank { "Familienmitglied" } ?: "Familienmitglied",
-                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = userProfile?.displayName?.ifBlank { "Familienmitglied" } ?: "Familienmitglied",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                IconButton(
+                                    onClick = { showEditProfileDialog = true },
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .testTag("edit_display_name_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Name ändern",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
                             if (!userProfile?.email.isNullOrBlank()) {
                                 Text(
                                     text = userProfile!!.email,
@@ -890,5 +912,13 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    if (showEditProfileDialog) {
+        EditProfileDialog(
+            currentDisplayName = userProfile?.displayName ?: "",
+            onDismiss = { showEditProfileDialog = false },
+            onSaveName = onUpdateDisplayName
+        )
     }
 }

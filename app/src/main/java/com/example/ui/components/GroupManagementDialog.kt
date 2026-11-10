@@ -55,13 +55,22 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.FamilyGroup
 
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.TextButton
+
 @Composable
 fun GroupManagementDialog(
     activeGroup: FamilyGroup?,
     userGroups: List<FamilyGroup>,
+    currentUserId: String?,
     onSelectGroup: (String) -> Unit,
     onCreateGroup: (name: String, code: String?) -> Unit,
     onJoinGroup: (code: String) -> Unit,
+    onDeleteGroup: (groupId: String) -> Unit,
+    onLeaveGroup: (groupId: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -71,6 +80,9 @@ fun GroupManagementDialog(
     var newGroupCustomCode by remember { mutableStateOf("") }
 
     var joinCodeInput by remember { mutableStateOf("") }
+
+    var groupToDelete by remember { mutableStateOf<FamilyGroup?>(null) }
+    var groupToLeave by remember { mutableStateOf<FamilyGroup?>(null) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -151,16 +163,50 @@ fun GroupManagementDialog(
                                 )
                             ) {
                                 Column(modifier = Modifier.padding(16.dp)) {
-                                    Text(
-                                        text = activeGroup.name,
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                    Text(
-                                        text = "${activeGroup.memberUids.size} Familienmitglieder synchronisiert",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = activeGroup.name,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                            )
+                                            val isOwner = activeGroup.ownerId == currentUserId
+                                            Text(
+                                                text = "${activeGroup.memberUids.size} Familienmitglieder synchronisiert" +
+                                                        if (isOwner) " • Ersteller" else "",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            )
+                                        }
+
+                                        if (activeGroup.ownerId == currentUserId) {
+                                            IconButton(
+                                                onClick = { groupToDelete = activeGroup },
+                                                modifier = Modifier.testTag("delete_active_group_btn")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Gruppe löschen",
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        } else {
+                                            IconButton(
+                                                onClick = { groupToLeave = activeGroup },
+                                                modifier = Modifier.testTag("leave_active_group_btn")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ExitToApp,
+                                                    contentDescription = "Gruppe verlassen",
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                        }
+                                    }
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -258,16 +304,48 @@ fun GroupManagementDialog(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(text = grp.name, fontWeight = FontWeight.SemiBold)
-                                            Text(text = "Code: ${grp.code}", fontSize = 12.sp)
-                                        }
-                                        if (grp.id == activeGroup?.id) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Aktiv",
-                                                tint = MaterialTheme.colorScheme.primary
+                                            val isOwner = grp.ownerId == currentUserId
+                                            Text(
+                                                text = "Code: ${grp.code}" + if (isOwner) " • Ersteller" else "",
+                                                fontSize = 12.sp
                                             )
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (grp.id == activeGroup?.id) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Aktiv",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.padding(end = 6.dp)
+                                                )
+                                            }
+                                            if (grp.ownerId == currentUserId) {
+                                                IconButton(
+                                                    onClick = { groupToDelete = grp },
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Gruppe löschen",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            } else {
+                                                IconButton(
+                                                    onClick = { groupToLeave = grp },
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ExitToApp,
+                                                        contentDescription = "Gruppe verlassen",
+                                                        tint = MaterialTheme.colorScheme.outline,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -378,5 +456,59 @@ fun GroupManagementDialog(
                 }
             }
         }
+    }
+
+    if (groupToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { groupToDelete = null },
+            title = { Text("Gruppe wirklich löschen?") },
+            text = {
+                Text("Möchtest du die Gruppe '${groupToDelete!!.name}' unwiderruflich löschen? Alle darin enthaltenen Geräte, Wartungen und der Sync-Code werden gelöscht.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = groupToDelete!!.id
+                        groupToDelete = null
+                        onDeleteGroup(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Endgültig löschen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToDelete = null }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    if (groupToLeave != null) {
+        AlertDialog(
+            onDismissRequest = { groupToLeave = null },
+            title = { Text("Gruppe verlassen?") },
+            text = {
+                Text("Möchtest du die Gruppe '${groupToLeave!!.name}' verlassen? Du verlierst den Zugriff auf die gemeinsamen Geräte dieser Gruppe.")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val id = groupToLeave!!.id
+                        groupToLeave = null
+                        onLeaveGroup(id)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Gruppe verlassen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { groupToLeave = null }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
     }
 }
