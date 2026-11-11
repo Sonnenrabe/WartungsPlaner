@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -103,6 +104,7 @@ fun MaintenanceTaskDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.90f)
                 .padding(16.dp)
                 .imePadding()
                 .navigationBarsPadding(),
@@ -290,7 +292,12 @@ fun MaintenanceTaskDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 12.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.Repeat,
                                         contentDescription = null,
@@ -495,6 +502,8 @@ fun MaintenanceTaskDialog(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

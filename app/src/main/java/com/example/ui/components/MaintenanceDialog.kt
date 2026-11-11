@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -62,6 +63,7 @@ fun MaintenanceDialog(
     machines: List<Machine>,
     preselectedMachine: Machine?,
     defaultPerformerName: String,
+    entryToEdit: MaintenanceEntry? = null,
     onDismiss: () -> Unit,
     onSave: (entry: MaintenanceEntry, rescheduleDate: String?, rescheduleTask: String?) -> Unit
 ) {
@@ -69,20 +71,30 @@ fun MaintenanceDialog(
     val today = remember { LocalDate.now() }
 
     var selectedMachine by remember {
-        mutableStateOf(preselectedMachine ?: machines.firstOrNull())
+        mutableStateOf(
+            preselectedMachine
+                ?: machines.firstOrNull { it.id == entryToEdit?.machineId }
+                ?: machines.firstOrNull()
+        )
     }
     var machineDropdownExpanded by remember { mutableStateOf(false) }
 
-    var title by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf("Inspektion") }
-    var completedDate by remember { mutableStateOf(today.format(dateFormatter)) }
-    var performedBy by remember { mutableStateOf(defaultPerformerName) }
-    var notes by remember { mutableStateOf("") }
+    var title by remember { mutableStateOf(entryToEdit?.title ?: "") }
+    var selectedType by remember { mutableStateOf(entryToEdit?.type ?: "Inspektion") }
+    var completedDate by remember {
+        mutableStateOf(entryToEdit?.completedDate?.takeIf { it.isNotBlank() } ?: today.format(dateFormatter))
+    }
+    var performedBy by remember {
+        mutableStateOf(entryToEdit?.performedBy?.takeIf { it.isNotBlank() } ?: defaultPerformerName)
+    }
+    var notes by remember { mutableStateOf(entryToEdit?.notes ?: "") }
 
     // Rescheduling feature
-    var shouldReschedule by remember { mutableStateOf(true) }
-    var rescheduleTaskTitle by remember { mutableStateOf("") }
-    var rescheduleDate by remember { mutableStateOf(today.plusYears(1).format(dateFormatter)) }
+    var shouldReschedule by remember { mutableStateOf(if (entryToEdit != null) false else true) }
+    var rescheduleTaskTitle by remember { mutableStateOf(entryToEdit?.title ?: "") }
+    var rescheduleDate by remember {
+        mutableStateOf(entryToEdit?.nextScheduledDate?.takeIf { it.isNotBlank() } ?: today.plusYears(1).format(dateFormatter))
+    }
 
     val quickTitles = listOf(
         "Ölwechsel", "Batteriewechsel", "Messer schärfen",
@@ -100,6 +112,7 @@ fun MaintenanceDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.90f)
                 .padding(16.dp)
                 .imePadding()
                 .navigationBarsPadding(),
@@ -119,7 +132,7 @@ fun MaintenanceDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Wartung eintragen",
+                        text = if (entryToEdit == null) "Wartung eintragen" else "Wartung bearbeiten",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -294,7 +307,12 @@ fun MaintenanceDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Default.Repeat,
                                     contentDescription = null,
@@ -394,16 +412,17 @@ fun MaintenanceDialog(
                     onClick = {
                         val machine = selectedMachine ?: return@Button
 
-                        val entry = MaintenanceEntry(
+                        val entry = (entryToEdit ?: MaintenanceEntry()).copy(
+                            id = entryToEdit?.id ?: "",
                             groupId = machine.groupId,
                             machineId = machine.id,
                             machineName = machine.name,
                             title = title.ifBlank { "Wartung" },
                             type = selectedType,
                             completedDate = completedDate.ifBlank { today.format(dateFormatter) },
-                            nextScheduledDate = if (shouldReschedule) rescheduleDate else "",
-                            performedBy = performedBy.ifBlank { "Ich" },
-                            cost = 0.0,
+                            nextScheduledDate = if (shouldReschedule) rescheduleDate else (entryToEdit?.nextScheduledDate ?: ""),
+                            performedBy = performedBy.ifBlank { defaultPerformerName },
+                            cost = entryToEdit?.cost ?: 0.0,
                             notes = notes
                         )
 
@@ -422,8 +441,13 @@ fun MaintenanceDialog(
                 ) {
                     Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Wartung speichern", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (entryToEdit == null) "Wartung speichern" else "Änderungen speichern",
+                        fontWeight = FontWeight.Bold
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(48.dp))
             }
         }
     }

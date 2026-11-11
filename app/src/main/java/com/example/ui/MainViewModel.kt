@@ -77,6 +77,7 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
 
     val showMaintenanceDialog = MutableStateFlow(false)
     val preselectedMachineForMaintenance = MutableStateFlow<Machine?>(null)
+    val editingMaintenance = MutableStateFlow<MaintenanceEntry?>(null)
 
     val showGroupDialog = MutableStateFlow(false)
     val showManageDeviceGroupsDialog = MutableStateFlow(false)
@@ -541,6 +542,7 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
             result.onSuccess {
                 showMaintenanceDialog.value = false
                 preselectedMachineForMaintenance.value = null
+                editingMaintenance.value = null
                 val msg = if (!rescheduleDate.isNullOrBlank()) {
                     "Wartung dokumentiert und Folgetermin für $rescheduleDate terminiert!"
                 } else {

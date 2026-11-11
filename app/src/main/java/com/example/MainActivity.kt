@@ -142,6 +142,7 @@ fun MainAppContent(
     val editingMachine by viewModel.editingMachine.collectAsStateWithLifecycle()
     val showMaintenanceDialog by viewModel.showMaintenanceDialog.collectAsStateWithLifecycle()
     val preselectedMachineForMaintenance by viewModel.preselectedMachineForMaintenance.collectAsStateWithLifecycle()
+    val editingMaintenance by viewModel.editingMaintenance.collectAsStateWithLifecycle()
     val showGroupDialog by viewModel.showGroupDialog.collectAsStateWithLifecycle()
     val showManageDeviceGroupsDialog by viewModel.showManageDeviceGroupsDialog.collectAsStateWithLifecycle()
     val showBackupDialog by viewModel.showBackupDialog.collectAsStateWithLifecycle()
@@ -235,7 +236,13 @@ fun MainAppContent(
                         )
                     },
                     onAddMaintenanceManual = {
+                        viewModel.editingMaintenance.value = null
                         viewModel.preselectedMachineForMaintenance.value = selectedMachine
+                        viewModel.showMaintenanceDialog.value = true
+                    },
+                    onEditMaintenance = { entry ->
+                        viewModel.editingMaintenance.value = entry
+                        viewModel.preselectedMachineForMaintenance.value = machines.firstOrNull { it.id == entry.machineId } ?: selectedMachine
                         viewModel.showMaintenanceDialog.value = true
                     },
                     onDeleteMaintenance = { maintId ->
@@ -320,9 +327,11 @@ fun MainAppContent(
             machines = machines,
             preselectedMachine = preselectedMachineForMaintenance,
             defaultPerformerName = userProfile?.displayName?.ifBlank { "Ich" } ?: "Ich",
+            entryToEdit = editingMaintenance,
             onDismiss = {
                 viewModel.showMaintenanceDialog.value = false
                 viewModel.preselectedMachineForMaintenance.value = null
+                viewModel.editingMaintenance.value = null
             },
             onSave = { entry, rescheduleDate, rescheduleTask ->
                 viewModel.saveMaintenance(entry, rescheduleDate, rescheduleTask)

@@ -95,6 +95,7 @@ fun MachineDetailScreen(
     onCompleteTask: (task: MaintenanceTask, completedDate: String, performedBy: String, notes: String, nextScheduledDate: String?, nextTaskTitle: String?) -> Unit,
     onRecordCompletedMaintenance: (title: String, completedDate: String, performedBy: String, notes: String, rescheduleDate: String?, intervalMonths: Long) -> Unit,
     onAddMaintenanceManual: () -> Unit,
+    onEditMaintenance: (MaintenanceEntry) -> Unit,
     onDeleteMaintenance: (String) -> Unit
 ) {
     BackHandler { onBack() }
@@ -344,56 +345,19 @@ fun MachineDetailScreen(
                         item {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Build,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Anstehende Aufgaben (${effectiveTasks.size})",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                }
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            taskToEdit = null
-                                            taskDialogInitiallyCompleted = true
-                                            showTaskDialog = true
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier
-                                            .height(34.dp)
-                                            .testTag("record_completed_maintenance_button")
-                                    ) {
-                                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Erledigt", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-
-                                    OutlinedButton(
-                                        onClick = {
-                                            taskToEdit = null
-                                            taskDialogInitiallyCompleted = false
-                                            showTaskDialog = true
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier
-                                            .height(34.dp)
-                                            .testTag("add_task_button")
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Planen", fontSize = 11.sp)
-                                    }
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Build,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Anstehende Aufgaben (${effectiveTasks.size})",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                )
                             }
                         }
 
@@ -667,16 +631,33 @@ fun MachineDetailScreen(
                                                 }
                                             }
 
-                                            IconButton(
-                                                onClick = { maintenanceToDelete = entry },
-                                                modifier = Modifier.size(28.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "Löschen",
-                                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                    modifier = Modifier.size(16.dp)
-                                                )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                IconButton(
+                                                    onClick = { onEditMaintenance(entry) },
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .testTag("edit_maintenance_${entry.id}")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Edit,
+                                                        contentDescription = "Wartung bearbeiten",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { maintenanceToDelete = entry },
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .testTag("delete_maintenance_${entry.id}")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "Löschen",
+                                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -858,6 +839,11 @@ fun MachineDetailScreen(
         MaintenanceDetailDialog(
             entry = viewingMaintenanceEntry!!,
             onDismiss = { viewingMaintenanceEntry = null },
+            onEdit = {
+                val entry = viewingMaintenanceEntry!!
+                viewingMaintenanceEntry = null
+                onEditMaintenance(entry)
+            },
             onDelete = {
                 val id = viewingMaintenanceEntry!!.id
                 viewingMaintenanceEntry = null

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -53,6 +54,7 @@ import com.example.data.model.MaintenanceTask
 fun MaintenanceDetailDialog(
     entry: MaintenanceEntry,
     onDismiss: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Dialog(
@@ -62,6 +64,7 @@ fun MaintenanceDetailDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.90f)
                 .padding(16.dp)
                 .imePadding()
                 .navigationBarsPadding(),
@@ -266,18 +269,32 @@ fun MaintenanceDetailDialog(
                         modifier = Modifier.testTag("delete_from_detail_dialog")
                     ) {
                         Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text("Löschen")
                     }
 
-                    Button(
-                        onClick = onDismiss,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.testTag("close_detail_button")
-                    ) {
-                        Text("Schließen")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = onEdit,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("edit_from_detail_dialog")
+                        ) {
+                            Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Bearbeiten")
+                        }
+
+                        Button(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("close_detail_button")
+                        ) {
+                            Text("Schließen")
+                        }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
