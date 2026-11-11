@@ -188,7 +188,16 @@ fun MainAppContent(
         ) {
             val selectedMachine = machines.firstOrNull { it.id == selectedMachineId }
             if (selectedMachine != null) {
-                val machineMaintenances = rawMaintenances.filter { it.machineId == selectedMachine.id }
+                val machineMaintenances = rawMaintenances
+                    .filter { it.machineId == selectedMachine.id }
+                    .sortedWith { a, b ->
+                        when {
+                            a.completedDate.isBlank() && b.completedDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                            a.completedDate.isBlank() -> 1
+                            b.completedDate.isBlank() -> -1
+                            else -> b.completedDate.compareTo(a.completedDate)
+                        }
+                    }
                 MachineDetailScreen(
                     machine = selectedMachine,
                     maintenances = machineMaintenances,

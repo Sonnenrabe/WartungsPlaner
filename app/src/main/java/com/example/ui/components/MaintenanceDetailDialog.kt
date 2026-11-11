@@ -256,41 +256,37 @@ fun MaintenanceDetailDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Actions
+                // Actions: Löschen und Bearbeiten nebeneinander
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(
                         onClick = onDelete,
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                        modifier = Modifier.testTag("delete_from_detail_dialog")
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .testTag("delete_from_detail_dialog")
                     ) {
-                        Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Löschen")
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Löschen", fontWeight = FontWeight.SemiBold)
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = onEdit,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("edit_from_detail_dialog")
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Bearbeiten")
-                        }
-
-                        Button(
-                            onClick = onDismiss,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("close_detail_button")
-                        ) {
-                            Text("Schließen")
-                        }
+                    Button(
+                        onClick = onEdit,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .testTag("edit_from_detail_dialog")
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Bearbeiten", fontWeight = FontWeight.Bold)
                     }
                 }
 

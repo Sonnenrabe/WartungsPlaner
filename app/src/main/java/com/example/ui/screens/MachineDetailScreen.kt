@@ -119,9 +119,9 @@ fun MachineDetailScreen(
     var noteText by remember(machine.notes) { mutableStateOf(machine.notes) }
     val hasUnsavedNoteChanges = remember(noteText, machine.notes) { noteText != machine.notes }
 
-    // Derive active tasks: if machine has explicit tasks list, use that.
+    // Derive active tasks: sorted automatically by due date (earliest due first)
     val effectiveTasks: List<MaintenanceTask> = remember(machine) {
-        if (machine.tasks.isNotEmpty()) {
+        val raw = if (machine.tasks.isNotEmpty()) {
             machine.tasks
         } else if (machine.nextDueDate.isNotBlank()) {
             listOf(
@@ -134,6 +134,26 @@ fun MachineDetailScreen(
             )
         } else {
             emptyList()
+        }
+        raw.sortedWith { a, b ->
+            when {
+                a.dueDate.isBlank() && b.dueDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                a.dueDate.isBlank() -> 1
+                b.dueDate.isBlank() -> -1
+                else -> a.dueDate.compareTo(b.dueDate)
+            }
+        }
+    }
+
+    // Wartungshistorie: automatisch nach Abschlussdatum sortiert (neueste zuerst)
+    val sortedMaintenances: List<MaintenanceEntry> = remember(maintenances) {
+        maintenances.sortedWith { a, b ->
+            when {
+                a.completedDate.isBlank() && b.completedDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                a.completedDate.isBlank() -> 1
+                b.completedDate.isBlank() -> -1
+                else -> b.completedDate.compareTo(a.completedDate)
+            }
         }
     }
 
@@ -546,7 +566,7 @@ fun MachineDetailScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Wartungshistorie (${maintenances.size})",
+                                        text = "Wartungshistorie (${sortedMaintenances.size})",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                                     )
                                 }
@@ -560,7 +580,7 @@ fun MachineDetailScreen(
                             }
                         }
 
-                        if (maintenances.isEmpty()) {
+                        if (sortedMaintenances.isEmpty()) {
                             item {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
@@ -585,7 +605,7 @@ fun MachineDetailScreen(
                                 }
                             }
                         } else {
-                            items(maintenances) { entry ->
+                            items(sortedMaintenances) { entry ->
                                 // CLICKABLE CARD TO VIEW ALL DETAILS (Point 1 fix!)
                                 Card(
                                     modifier = Modifier

@@ -164,7 +164,14 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
 
         maintenancesObservationJob = viewModelScope.launch {
             repository.observeMaintenances(groupId).collect { list ->
-                _maintenances.value = list
+                _maintenances.value = list.sortedWith { a, b ->
+                    when {
+                        a.completedDate.isBlank() && b.completedDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                        a.completedDate.isBlank() -> 1
+                        b.completedDate.isBlank() -> -1
+                        else -> b.completedDate.compareTo(a.completedDate)
+                    }
+                }
             }
         }
 
@@ -352,9 +359,20 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
         }
     }
 
+    private fun sortTasksByDueDate(tasks: List<com.example.data.model.MaintenanceTask>): List<com.example.data.model.MaintenanceTask> {
+        return tasks.sortedWith { a, b ->
+            when {
+                a.dueDate.isBlank() && b.dueDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                a.dueDate.isBlank() -> 1
+                b.dueDate.isBlank() -> -1
+                else -> a.dueDate.compareTo(b.dueDate)
+            }
+        }
+    }
+
     fun addTaskToMachine(machineId: String, task: com.example.data.model.MaintenanceTask) {
         val currentMachine = _machines.value.find { it.id == machineId } ?: return
-        val updatedTasks = currentMachine.tasks + task
+        val updatedTasks = sortTasksByDueDate(currentMachine.tasks + task)
         val (earliestDate, earliestTask) = calculateEarliestTask(updatedTasks)
 
         val updatedMachine = currentMachine.copy(
@@ -367,7 +385,7 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
 
     fun updateTaskOnMachine(machineId: String, task: com.example.data.model.MaintenanceTask) {
         val currentMachine = _machines.value.find { it.id == machineId } ?: return
-        val updatedTasks = currentMachine.tasks.map { if (it.id == task.id) task else it }
+        val updatedTasks = sortTasksByDueDate(currentMachine.tasks.map { if (it.id == task.id) task else it })
         val (earliestDate, earliestTask) = calculateEarliestTask(updatedTasks)
 
         val updatedMachine = currentMachine.copy(
@@ -380,7 +398,7 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
 
     fun deleteTaskFromMachine(machineId: String, taskId: String) {
         val currentMachine = _machines.value.find { it.id == machineId } ?: return
-        val updatedTasks = currentMachine.tasks.filter { it.id != taskId }
+        val updatedTasks = sortTasksByDueDate(currentMachine.tasks.filter { it.id != taskId })
         val (earliestDate, earliestTask) = calculateEarliestTask(updatedTasks)
 
         val updatedMachine = currentMachine.copy(
