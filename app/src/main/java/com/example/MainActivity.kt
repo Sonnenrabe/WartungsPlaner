@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,7 +41,11 @@ import com.example.ui.screens.MachineDetailScreen
 import com.example.ui.theme.WartungsPlanerTheme
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -57,51 +62,53 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+internal fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
+    val listener = FirebaseAuth.AuthStateListener { auth ->
+        trySend(auth.currentUser)
+    }
+    addAuthStateListener(listener)
+    awaitClose { removeAuthStateListener(listener) }
+}
+
 @Composable
 fun RootAuthGate() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
-        }
-    }
+    val auth = remember { Firebase.auth }
+    val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
 
     LaunchedEffect(Unit) {
-        if (currentUser == null) {
+        if (auth.currentUser == null) {
             attemptAutoSignIn(
                 context = context,
                 credentialManager = credentialManager,
-                onAuthSuccess = { currentUser = Firebase.auth.currentUser },
+                onAuthSuccess = {},
                 onUnauthenticated = {},
                 scope = coroutineScope
             )
         }
     }
 
-    if (currentUser == null) {
+    val user = currentUser
+    if (user == null) {
         AuthScreen(
-            onAuthSuccess = { currentUser = Firebase.auth.currentUser }
+            onAuthSuccess = {}
         )
     } else {
-        MainAppContent(
-            userId = currentUser!!.uid,
-            onSignOut = {
-                performSignOut(
-                    context = context,
-                    credentialManager = credentialManager,
-                    scope = coroutineScope,
-                    onSignOutComplete = { currentUser = null }
-                )
-            }
-        )
+        key(user.uid) {
+            MainAppContent(
+                userId = user.uid,
+                onSignOut = {
+                    performSignOut(
+                        context = context,
+                        credentialManager = credentialManager,
+                        scope = coroutineScope,
+                        onSignOutComplete = {}
+                    )
+                }
+            )
+        }
     }
 }
 
@@ -114,8 +121,9 @@ fun MainAppContent(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val repository = remember { MaintenanceRepository(context) }
+    val repository = remember(userId) { MaintenanceRepository(context.applicationContext) }
     val viewModel: MainViewModel = viewModel(
+        key = userId,
         factory = MainViewModel.Factory(repository)
     )
 
@@ -144,16 +152,23 @@ fun MainAppContent(
     val preselectedMachineForMaintenance by viewModel.preselectedMachineForMaintenance.collectAsStateWithLifecycle()
     val editingMaintenance by viewModel.editingMaintenance.collectAsStateWithLifecycle()
     val showGroupDialog by viewModel.showGroupDialog.collectAsStateWithLifecycle()
+    val isGroupActionLoading by viewModel.isGroupActionLoading.collectAsStateWithLifecycle()
+    val groupActionError by viewModel.groupActionError.collectAsStateWithLifecycle()
     val showManageDeviceGroupsDialog by viewModel.showManageDeviceGroupsDialog.collectAsStateWithLifecycle()
     val showBackupDialog by viewModel.showBackupDialog.collectAsStateWithLifecycle()
     val notification by viewModel.notification.collectAsStateWithLifecycle()
 
-    // Sync automatically on App-Start and when returning from standby (ON_RESUME)
+    // Sync when returning from standby (ON_RESUME), skipping the initial start resume
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, userId) {
+        var isFirstResume = true
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                viewModel.triggerSync(manualClick = false)
+                if (isFirstResume) {
+                    isFirstResume = false
+                } else if (viewModel.syncMode.value != "NUR_MANUELL") {
+                    viewModel.triggerSync(manualClick = false)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -290,7 +305,7 @@ fun MainAppContent(
                         viewModel.preselectedMachineForMaintenance.value = preselected
                         viewModel.showMaintenanceDialog.value = true
                     },
-                    onManageGroupClick = { viewModel.showGroupDialog.value = true },
+                    onManageGroupClick = { viewModel.openGroupDialog() },
                     onManageDeviceGroupsClick = { viewModel.showManageDeviceGroupsDialog.value = true },
                     onOpenBackupClick = { viewModel.showBackupDialog.value = true },
                     onUpdateDisplayName = { newName -> viewModel.updateDisplayName(newName) },
@@ -353,10 +368,13 @@ fun MainAppContent(
         GroupManagementDialog(
             activeGroup = activeGroup,
             userGroups = userGroups,
-            currentUserId = viewModel.currentUser?.uid,
+            currentUserId = userId,
+            isLoading = isGroupActionLoading,
+            errorMessage = groupActionError,
+            onClearError = { viewModel.clearGroupActionError() },
             onSelectGroup = { groupId ->
                 viewModel.switchActiveGroup(groupId)
-                viewModel.showGroupDialog.value = false
+                viewModel.dismissGroupDialog()
             },
             onCreateGroup = { name, code ->
                 viewModel.createNewGroup(name, code)
@@ -370,7 +388,7 @@ fun MainAppContent(
             onLeaveGroup = { groupId ->
                 viewModel.leaveGroup(groupId)
             },
-            onDismiss = { viewModel.showGroupDialog.value = false }
+            onDismiss = { viewModel.dismissGroupDialog() }
         )
     }
 

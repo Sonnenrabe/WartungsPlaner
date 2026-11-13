@@ -630,9 +630,20 @@ fun DashboardScreen(
                     }
 
                     ExtendedFloatingActionButton(
-                        onClick = onAddMachineClick,
-                        icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
-                        text = { Text("Gerät anlegen") },
+                        onClick = {
+                            if (activeGroup == null) {
+                                onManageGroupClick()
+                            } else {
+                                onAddMachineClick()
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = if (activeGroup == null) Icons.Default.Group else Icons.Default.Add,
+                                contentDescription = null
+                            )
+                        },
+                        text = { Text(if (activeGroup == null) "Familie verbinden" else "Gerät anlegen") },
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.testTag("fab_add_machine")
@@ -747,8 +758,63 @@ fun DashboardScreen(
                     )
                 }
 
-                // Machines List or Grouped Accordion
-                if (machines.isEmpty()) {
+                // Machines List, Grouped Accordion, or Welcome/Group Connection State
+                if (activeGroup == null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.widthIn(max = 480.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(76.dp)
+                                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Group,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(38.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Willkommen beim WartungsPlaner!",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Um Fahrzeuge, Werkzeuge und Geräte gemeinsam zu pflegen, verbinde dich mit deiner Familie oder erstelle eine neue Gruppe.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = onManageGroupClick,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(50.dp)
+                                    .testTag("welcome_connect_family_button")
+                            ) {
+                                Icon(imageVector = Icons.Default.Group, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Familie verbinden / Gruppe erstellen", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else if (machines.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -774,7 +840,7 @@ fun DashboardScreen(
                             }
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Noch keine Geräte vorhanden",
+                                text = "Noch keine Geräte in '${activeGroup.name}'",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )

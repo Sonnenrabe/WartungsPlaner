@@ -74,10 +74,10 @@ test("Cross-user isolation: Bob cannot read Alice's user profile", async () => {
   await assertFails(bobDb.collection("users").doc(ALICE_UID).get());
 });
 
-test("Family Group: Alice creates group, Bob joins via member list update, Charlie cannot read", async () => {
+test("Family Group: Alice creates group & code, queries via array-contains, Bob joins safely, Charlie cannot read machines or hijack code", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   
-  // Alice creates family group
+  // Alice creates family group and invite code
   await assertSucceeds(
     aliceDb.collection("groups").doc("group_fam1").set({
       id: "group_fam1",
@@ -89,10 +89,34 @@ test("Family Group: Alice creates group, Bob joins via member list update, Charl
       updatedAt: new Date(),
     })
   );
+  await assertSucceeds(
+    aliceDb.collection("group_codes").doc("FAM-1234").set({
+      code: "FAM-1234",
+      groupId: "group_fam1",
+      name: "Familie Hoetger",
+      createdAt: new Date(),
+    })
+  );
 
-  // Bob is not in memberUids yet -> cannot read
+  // Alice can list her own groups using array-contains, but unfiltered list fails
+  await assertSucceeds(
+    aliceDb.collection("groups").where("memberUids", "array-contains", ALICE_UID).get()
+  );
+  await assertFails(aliceDb.collection("groups").get());
+
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
-  await assertFails(bobDb.collection("groups").doc("group_fam1").get());
+
+  // Bob looks up code
+  await assertSucceeds(bobDb.collection("group_codes").doc("FAM-1234").get());
+
+  // Bob cannot tamper with ownerId when joining
+  await assertFails(
+    bobDb.collection("groups").doc("group_fam1").update({
+      ownerId: BOB_UID,
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: new Date(),
+    })
+  );
 
   // Bob joins group by appending his UID
   await assertSucceeds(
@@ -102,12 +126,22 @@ test("Family Group: Alice creates group, Bob joins via member list update, Charl
     })
   );
 
-  // Now Bob can read group
+  // Now Bob can read group and list his groups
   await assertSucceeds(bobDb.collection("groups").doc("group_fam1").get());
+  await assertSucceeds(
+    bobDb.collection("groups").where("memberUids", "array-contains", BOB_UID).get()
+  );
 
-  // Charlie is not a member -> cannot read
+  // Charlie cannot hijack existing invite code or read machines subcollection
   const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
-  await assertFails(charlieDb.collection("groups").doc("group_fam1").get());
+  await assertFails(
+    charlieDb.collection("group_codes").doc("FAM-1234").set({
+      code: "FAM-1234",
+      groupId: "other_group",
+      name: "Evil",
+    })
+  );
+  await assertFails(charlieDb.collection("groups").doc("group_fam1").collection("machines").get());
 });
 
 test("Machines & Maintenance: group members can create and read machines and log maintenance", async () => {

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,20 +25,28 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,17 +65,14 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.FamilyGroup
 
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.TextButton
-
 @Composable
 fun GroupManagementDialog(
     activeGroup: FamilyGroup?,
     userGroups: List<FamilyGroup>,
     currentUserId: String?,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    onClearError: () -> Unit = {},
     onSelectGroup: (String) -> Unit,
     onCreateGroup: (name: String, code: String?) -> Unit,
     onJoinGroup: (code: String) -> Unit,
@@ -74,7 +81,7 @@ fun GroupManagementDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(if (activeGroup == null) 1 else 0) }
 
     var newGroupName by remember { mutableStateOf("") }
     var newGroupCustomCode by remember { mutableStateOf("") }
@@ -85,13 +92,15 @@ fun GroupManagementDialog(
     var groupToLeave by remember { mutableStateOf<FamilyGroup?>(null) }
 
     Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        onDismissRequest = { if (!isLoading) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .padding(16.dp),
+                .padding(16.dp)
+                .imePadding()
+                .navigationBarsPadding(),
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp
@@ -122,6 +131,7 @@ fun GroupManagementDialog(
                     }
                     IconButton(
                         onClick = onDismiss,
+                        enabled = !isLoading,
                         modifier = Modifier.testTag("close_group_dialog")
                     ) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Schließen")
@@ -134,19 +144,59 @@ fun GroupManagementDialog(
                 TabRow(selectedTabIndex = selectedTab) {
                     Tab(
                         selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
+                        onClick = {
+                            selectedTab = 0
+                            onClearError()
+                        },
                         text = { Text("Aktuell", fontSize = 13.sp) }
                     )
                     Tab(
                         selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
+                        onClick = {
+                            selectedTab = 1
+                            onClearError()
+                        },
                         text = { Text("Beitreten", fontSize = 13.sp) }
                     )
                     Tab(
                         selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
+                        onClick = {
+                            selectedTab = 2
+                            onClearError()
+                        },
                         text = { Text("Neu erstellen", fontSize = 13.sp) }
                     )
+                }
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("group_dialog_error_banner"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = errorMessage,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -186,6 +236,7 @@ fun GroupManagementDialog(
                                         if (activeGroup.ownerId == currentUserId) {
                                             IconButton(
                                                 onClick = { groupToDelete = activeGroup },
+                                                enabled = !isLoading,
                                                 modifier = Modifier.testTag("delete_active_group_btn")
                                             ) {
                                                 Icon(
@@ -197,6 +248,7 @@ fun GroupManagementDialog(
                                         } else {
                                             IconButton(
                                                 onClick = { groupToLeave = activeGroup },
+                                                enabled = !isLoading,
                                                 modifier = Modifier.testTag("leave_active_group_btn")
                                             ) {
                                                 Icon(
@@ -268,17 +320,43 @@ fun GroupManagementDialog(
                             }
                         } else {
                             Text(
-                                text = "Du bist aktuell in keiner Gruppe. Tritt einer Gruppe bei oder erstelle eine neue!",
+                                text = "Du bist aktuell in keiner Gruppe. Tritt einer Gruppe per Sync-Code bei oder erstelle eine neue!",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        selectedTab = 1
+                                        onClearError()
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Beitreten")
+                                }
+                                Button(
+                                    onClick = {
+                                        selectedTab = 2
+                                        onClearError()
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Neu erstellen")
+                                }
+                            }
                         }
 
                         // Switcher for other groups if any
                         if (userGroups.size > 1) {
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Deine anderen Gruppen:",
+                                text = "Deine Gruppen (${userGroups.size}):",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -287,7 +365,7 @@ fun GroupManagementDialog(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp)
-                                        .clickable { onSelectGroup(grp.id) },
+                                        .clickable(enabled = !isLoading) { onSelectGroup(grp.id) },
                                     shape = RoundedCornerShape(10.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = if (grp.id == activeGroup?.id) {
@@ -324,6 +402,7 @@ fun GroupManagementDialog(
                                             if (grp.ownerId == currentUserId) {
                                                 IconButton(
                                                     onClick = { groupToDelete = grp },
+                                                    enabled = !isLoading,
                                                     modifier = Modifier.size(36.dp)
                                                 ) {
                                                     Icon(
@@ -336,6 +415,7 @@ fun GroupManagementDialog(
                                             } else {
                                                 IconButton(
                                                     onClick = { groupToLeave = grp },
+                                                    enabled = !isLoading,
                                                     modifier = Modifier.size(36.dp)
                                                 ) {
                                                     Icon(
@@ -370,10 +450,14 @@ fun GroupManagementDialog(
 
                         OutlinedTextField(
                             value = joinCodeInput,
-                            onValueChange = { joinCodeInput = it.uppercase() },
+                            onValueChange = {
+                                joinCodeInput = it.uppercase()
+                                onClearError()
+                            },
                             label = { Text("Sync-Code") },
                             placeholder = { Text("z.B. FAM-8392") },
                             singleLine = true,
+                            enabled = !isLoading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("join_code_input")
@@ -383,16 +467,26 @@ fun GroupManagementDialog(
 
                         Button(
                             onClick = { onJoinGroup(joinCodeInput) },
-                            enabled = joinCodeInput.isNotBlank(),
+                            enabled = joinCodeInput.trim().isNotBlank() && !isLoading,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
                                 .testTag("submit_join_code_button")
                         ) {
-                            Icon(imageVector = Icons.Default.GroupAdd, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Gruppe beitreten", fontWeight = FontWeight.Bold)
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Trete Gruppe bei...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(imageVector = Icons.Default.GroupAdd, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Gruppe beitreten", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
@@ -413,10 +507,14 @@ fun GroupManagementDialog(
 
                         OutlinedTextField(
                             value = newGroupName,
-                            onValueChange = { newGroupName = it },
+                            onValueChange = {
+                                newGroupName = it
+                                onClearError()
+                            },
                             label = { Text("Gruppenname *") },
                             placeholder = { Text("z.B. Familie Hoetger, Werkstatt Garage") },
                             singleLine = true,
+                            enabled = !isLoading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("new_group_name_input")
@@ -426,10 +524,14 @@ fun GroupManagementDialog(
 
                         OutlinedTextField(
                             value = newGroupCustomCode,
-                            onValueChange = { newGroupCustomCode = it.uppercase() },
+                            onValueChange = {
+                                newGroupCustomCode = it.uppercase()
+                                onClearError()
+                            },
                             label = { Text("Eigener Wunsch-Code (optional)") },
-                            placeholder = { Text("Leer lassen für automatischen Code") },
+                            placeholder = { Text("Mind. 3 Zeichen oder leer lassen") },
                             singleLine = true,
+                            enabled = !isLoading,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("new_group_code_input")
@@ -441,16 +543,26 @@ fun GroupManagementDialog(
                             onClick = {
                                 onCreateGroup(newGroupName, newGroupCustomCode.ifBlank { null })
                             },
-                            enabled = newGroupName.isNotBlank(),
+                            enabled = newGroupName.trim().isNotBlank() && !isLoading,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
                                 .testTag("submit_create_group_button")
                         ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Gruppe anlegen", fontWeight = FontWeight.Bold)
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Erstelle Gruppe...", fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Gruppe anlegen", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

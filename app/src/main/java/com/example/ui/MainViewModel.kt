@@ -11,11 +11,13 @@ import com.example.data.repository.MaintenanceRepository
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
+import android.util.Log
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -80,6 +82,8 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
     val editingMaintenance = MutableStateFlow<MaintenanceEntry?>(null)
 
     val showGroupDialog = MutableStateFlow(false)
+    val isGroupActionLoading = MutableStateFlow(false)
+    val groupActionError = MutableStateFlow<String?>(null)
     val showManageDeviceGroupsDialog = MutableStateFlow(false)
     val showBackupDialog = MutableStateFlow(false)
 
@@ -91,12 +95,28 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
     val isSyncing = MutableStateFlow(false)
     val syncMode = MutableStateFlow("BEI_START_UND_STANDBY") // "BEI_START_UND_STANDBY", "ECHTZEIT", "NUR_MANUELL"
 
+    fun openGroupDialog() {
+        groupActionError.value = null
+        showGroupDialog.value = true
+    }
+
+    fun dismissGroupDialog() {
+        if (!isGroupActionLoading.value) {
+            groupActionError.value = null
+            showGroupDialog.value = false
+        }
+    }
+
+    fun clearGroupActionError() {
+        groupActionError.value = null
+    }
+
     fun triggerSync(manualClick: Boolean = false) {
         viewModelScope.launch {
             isSyncing.value = true
             val groupId = _activeGroup.value?.id
             if (!groupId.isNullOrBlank()) {
-                switchActiveGroup(groupId)
+                switchActiveGroup(groupId, persistToProfile = false)
             } else {
                 val uid = auth.currentUser?.uid
                 if (uid != null) {
@@ -112,6 +132,8 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
         }
     }
 
+    private var userProfileObservationJob: Job? = null
+    private var userGroupsObservationJob: Job? = null
     private var activeGroupObservationJob: Job? = null
     private var machinesObservationJob: Job? = null
     private var maintenancesObservationJob: Job? = null
@@ -124,100 +146,167 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
     }
 
     fun initUserData(uid: String) {
+        userProfileObservationJob?.cancel()
+        userGroupsObservationJob?.cancel()
+
+        // Ensure initial user profile exists without overwriting an existing custom displayName
         viewModelScope.launch {
-            repository.observeUserProfile(uid).collect { profile ->
-                _userProfile.value = profile
-                if (profile != null && profile.activeGroupId.isNotBlank() && _activeGroup.value?.id != profile.activeGroupId) {
-                    switchActiveGroup(profile.activeGroupId)
-                }
+            try {
+                repository.ensureUserProfileExists(uid)
+            } catch (e: Exception) {
+                Log.w("MainViewModel", "Auto-init user profile: ${e.message}")
             }
         }
 
-        viewModelScope.launch {
-            repository.observeUserGroups(uid).collect { groups ->
-                _userGroups.value = groups
-                if (_activeGroup.value == null && groups.isNotEmpty()) {
-                    val targetGroupId = _userProfile.value?.activeGroupId?.takeIf { id -> groups.any { it.id == id } }
-                        ?: groups.first().id
-                    switchActiveGroup(targetGroupId)
+        userProfileObservationJob = viewModelScope.launch {
+            repository.observeUserProfile(uid)
+                .catch { e -> Log.e("MainViewModel", "observeUserProfile error: ${e.message}", e) }
+                .collect { profile ->
+                    _userProfile.value = profile
+                    if (profile != null &&
+                        profile.activeGroupId.isNotBlank() &&
+                        _activeGroup.value?.id != profile.activeGroupId &&
+                        _userGroups.value.any { it.id == profile.activeGroupId }
+                    ) {
+                        switchActiveGroup(profile.activeGroupId, persistToProfile = false)
+                    }
                 }
-            }
+        }
+
+        userGroupsObservationJob = viewModelScope.launch {
+            repository.observeUserGroups(uid)
+                .catch { e -> Log.e("MainViewModel", "observeUserGroups error: ${e.message}", e) }
+                .collect { groups ->
+                    _userGroups.value = groups
+                    if (groups.isEmpty()) {
+                        activeGroupObservationJob?.cancel()
+                        machinesObservationJob?.cancel()
+                        maintenancesObservationJob?.cancel()
+                        _activeGroup.value = null
+                        _machines.value = emptyList()
+                        _maintenances.value = emptyList()
+                    } else {
+                        val currentActiveId = _activeGroup.value?.id
+                        if (currentActiveId == null || groups.none { it.id == currentActiveId }) {
+                            val profileActiveId = _userProfile.value?.activeGroupId
+                            val targetGroupId = profileActiveId?.takeIf { id -> groups.any { it.id == id } }
+                                ?: groups.first().id
+                            switchActiveGroup(
+                                groupId = targetGroupId,
+                                persistToProfile = targetGroupId != profileActiveId
+                            )
+                        }
+                    }
+                }
         }
     }
 
-    fun switchActiveGroup(groupId: String) {
+    fun switchActiveGroup(groupId: String, persistToProfile: Boolean = true) {
         activeGroupObservationJob?.cancel()
         machinesObservationJob?.cancel()
         maintenancesObservationJob?.cancel()
 
         activeGroupObservationJob = viewModelScope.launch {
-            repository.observeGroup(groupId).collect { group ->
-                _activeGroup.value = group
-            }
+            repository.observeGroup(groupId)
+                .catch { e -> Log.e("MainViewModel", "observeGroup error: ${e.message}", e) }
+                .collect { group ->
+                    _activeGroup.value = group
+                }
         }
 
         machinesObservationJob = viewModelScope.launch {
-            repository.observeMachines(groupId).collect { list ->
-                _machines.value = list
-            }
+            repository.observeMachines(groupId)
+                .catch { e -> Log.e("MainViewModel", "observeMachines error: ${e.message}", e) }
+                .collect { list ->
+                    _machines.value = list
+                }
         }
 
         maintenancesObservationJob = viewModelScope.launch {
-            repository.observeMaintenances(groupId).collect { list ->
-                _maintenances.value = list.sortedWith { a, b ->
-                    when {
-                        a.completedDate.isBlank() && b.completedDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
-                        a.completedDate.isBlank() -> 1
-                        b.completedDate.isBlank() -> -1
-                        else -> b.completedDate.compareTo(a.completedDate)
+            repository.observeMaintenances(groupId)
+                .catch { e -> Log.e("MainViewModel", "observeMaintenances error: ${e.message}", e) }
+                .collect { list ->
+                    _maintenances.value = list.sortedWith { a, b ->
+                        when {
+                            a.completedDate.isBlank() && b.completedDate.isBlank() -> a.title.compareTo(b.title, ignoreCase = true)
+                            a.completedDate.isBlank() -> 1
+                            b.completedDate.isBlank() -> -1
+                            else -> b.completedDate.compareTo(a.completedDate)
+                        }
                     }
+                }
+        }
+
+        if (persistToProfile) {
+            viewModelScope.launch {
+                try {
+                    repository.setActiveGroupId(groupId)
+                } catch (e: Exception) {
+                    Log.w("MainViewModel", "Persist active group in profile error: ${e.message}")
                 }
             }
         }
+    }
 
-        // Persist active group in user profile
-        viewModelScope.launch {
-            val uid = auth.currentUser?.uid ?: return@launch
-            val current = _userProfile.value ?: UserProfile(userId = uid)
-            repository.saveUserProfile(current.copy(activeGroupId = groupId))
+    private fun formatGroupError(prefix: String, e: Throwable): String {
+        val msg = e.localizedMessage ?: "Unbekannter Fehler"
+        return if (msg.contains("PERMISSION_DENIED", ignoreCase = true)) {
+            "$prefix: Keine Berechtigung oder fehlende Verbindung zu Firebase ($msg)."
+        } else {
+            msg
         }
     }
 
     fun createNewGroup(name: String, code: String?) {
         viewModelScope.launch {
+            isGroupActionLoading.value = true
+            groupActionError.value = null
             isLoading.value = true
             val result = repository.createGroup(name, code)
             isLoading.value = false
+            isGroupActionLoading.value = false
             result.onSuccess { created ->
-                switchActiveGroup(created.id)
+                switchActiveGroup(created.id, persistToProfile = false)
                 showGroupDialog.value = false
+                groupActionError.value = null
                 notification.value = UiNotification("Gruppe '${created.name}' mit Code ${created.code} erstellt!")
             }.onFailure { e ->
-                notification.value = UiNotification("Fehler beim Erstellen der Gruppe: ${e.localizedMessage}", isError = true)
+                val errorText = formatGroupError("Fehler beim Erstellen der Gruppe", e)
+                groupActionError.value = errorText
+                notification.value = UiNotification(errorText, isError = true)
             }
         }
     }
 
     fun joinGroupByCode(code: String) {
         viewModelScope.launch {
+            isGroupActionLoading.value = true
+            groupActionError.value = null
             isLoading.value = true
             val result = repository.joinGroupByCode(code)
             isLoading.value = false
+            isGroupActionLoading.value = false
             result.onSuccess { joined ->
-                switchActiveGroup(joined.id)
+                switchActiveGroup(joined.id, persistToProfile = false)
                 showGroupDialog.value = false
+                groupActionError.value = null
                 notification.value = UiNotification("Erfolgreich der Gruppe '${joined.name}' beigetreten!")
             }.onFailure { e ->
-                notification.value = UiNotification(e.localizedMessage ?: "Beitritt fehlgeschlagen", isError = true)
+                val errorText = formatGroupError("Beitritt fehlgeschlagen", e)
+                groupActionError.value = errorText
+                notification.value = UiNotification(errorText, isError = true)
             }
         }
     }
 
     fun deleteGroup(groupId: String) {
         viewModelScope.launch {
+            isGroupActionLoading.value = true
+            groupActionError.value = null
             isLoading.value = true
             val result = repository.deleteGroup(groupId)
             isLoading.value = false
+            isGroupActionLoading.value = false
             result.onSuccess {
                 notification.value = UiNotification("Gruppe erfolgreich gelöscht.")
                 if (_activeGroup.value?.id == groupId) {
@@ -225,22 +314,30 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
                     if (nextGroup != null) {
                         switchActiveGroup(nextGroup.id)
                     } else {
+                        activeGroupObservationJob?.cancel()
+                        machinesObservationJob?.cancel()
+                        maintenancesObservationJob?.cancel()
                         _activeGroup.value = null
                         _machines.value = emptyList()
                         _maintenances.value = emptyList()
                     }
                 }
             }.onFailure { e ->
-                notification.value = UiNotification("Fehler beim Löschen: ${e.localizedMessage}", isError = true)
+                val errorText = formatGroupError("Fehler beim Löschen", e)
+                groupActionError.value = errorText
+                notification.value = UiNotification(errorText, isError = true)
             }
         }
     }
 
     fun leaveGroup(groupId: String) {
         viewModelScope.launch {
+            isGroupActionLoading.value = true
+            groupActionError.value = null
             isLoading.value = true
             val result = repository.leaveGroup(groupId)
             isLoading.value = false
+            isGroupActionLoading.value = false
             result.onSuccess {
                 notification.value = UiNotification("Gruppe verlassen.")
                 if (_activeGroup.value?.id == groupId) {
@@ -248,13 +345,18 @@ class MainViewModel(private val repository: MaintenanceRepository) : ViewModel()
                     if (nextGroup != null) {
                         switchActiveGroup(nextGroup.id)
                     } else {
+                        activeGroupObservationJob?.cancel()
+                        machinesObservationJob?.cancel()
+                        maintenancesObservationJob?.cancel()
                         _activeGroup.value = null
                         _machines.value = emptyList()
                         _maintenances.value = emptyList()
                     }
                 }
             }.onFailure { e ->
-                notification.value = UiNotification("Fehler beim Verlassen: ${e.localizedMessage}", isError = true)
+                val errorText = formatGroupError("Fehler beim Verlassen", e)
+                groupActionError.value = errorText
+                notification.value = UiNotification(errorText, isError = true)
             }
         }
     }

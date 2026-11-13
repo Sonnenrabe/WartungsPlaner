@@ -59,27 +59,102 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
         awaitClose { registration.remove() }
     }
 
+    suspend fun ensureUserProfileExists(userId: String): Result<Unit> = runCatching {
+        val uid = requireUserId()
+        if (uid != userId) throw IllegalStateException("Auth UID mismatch")
+        val docRef = db.collection("users").document(uid)
+        val snapshot = docRef.get().await()
+        val user = auth.currentUser
+        val authName = user?.displayName?.trim()?.takeIf { it.isNotBlank() } ?: "Familienmitglied"
+        val authEmail = user?.email?.trim() ?: ""
+
+        if (!snapshot.exists()) {
+            val payload = mapOf(
+                "userId" to uid,
+                "displayName" to authName.take(100),
+                "email" to authEmail.take(150),
+                "activeGroupId" to "",
+                "joinedGroupIds" to emptyList<String>(),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+        } else {
+            val existingName = snapshot.getString("displayName")?.trim() ?: ""
+            val existingEmail = snapshot.getString("email")?.trim() ?: ""
+            val updates = mutableMapOf<String, Any>()
+            if (existingName.isBlank()) {
+                updates["displayName"] = authName.take(100)
+            }
+            if (existingEmail.isBlank() && authEmail.isNotBlank()) {
+                updates["email"] = authEmail.take(150)
+            }
+            if (updates.isNotEmpty()) {
+                updates["updatedAt"] = FieldValue.serverTimestamp()
+                docRef.update(updates).await()
+            }
+        }
+        Unit
+    }.onFailure { handleFirestoreError(it as Exception, OperationType.WRITE, "users/$userId") }
+
+    suspend fun setActiveGroupId(groupId: String): Result<Unit> = runCatching {
+        val uid = requireUserId()
+        attachGroupToUserProfile(uid, groupId)
+        Unit
+    }.onFailure { handleFirestoreError(it as Exception, OperationType.UPDATE, "users/${auth.currentUser?.uid}") }
+
+    private suspend fun attachGroupToUserProfile(uid: String, groupId: String) {
+        val docRef = db.collection("users").document(uid)
+        val snapshot = docRef.get().await()
+        val user = auth.currentUser
+        val authName = user?.displayName?.trim()?.takeIf { it.isNotBlank() } ?: "Familienmitglied"
+        val authEmail = user?.email?.trim() ?: ""
+
+        if (!snapshot.exists()) {
+            val payload = mapOf(
+                "userId" to uid,
+                "displayName" to authName.take(100),
+                "email" to authEmail.take(150),
+                "activeGroupId" to groupId,
+                "joinedGroupIds" to listOf(groupId),
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            docRef.set(payload).await()
+        } else {
+            docRef.update(
+                mapOf(
+                    "activeGroupId" to groupId,
+                    "joinedGroupIds" to FieldValue.arrayUnion(groupId),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+    }
+
     suspend fun saveUserProfile(profile: UserProfile): Result<Unit> = runCatching {
         val uid = requireUserId()
         val docRef = db.collection("users").document(uid)
-        val existingDoc = docRef.get().await()
+        val user = auth.currentUser
+        val rawName = profile.displayName.ifBlank { user?.displayName ?: "" }
+        val cleanName = if (rawName.isBlank()) "Familienmitglied" else rawName.trim().take(100)
+        val rawEmail = profile.email.ifBlank { user?.email ?: "" }
 
         val payload = mutableMapOf<String, Any>(
             "userId" to uid,
-            "displayName" to profile.displayName.ifBlank { "Familienmitglied" },
-            "email" to (profile.email.ifBlank { auth.currentUser?.email ?: "" }),
-            "activeGroupId" to profile.activeGroupId,
-            "joinedGroupIds" to profile.joinedGroupIds,
+            "displayName" to cleanName,
+            "email" to rawEmail,
             "updatedAt" to FieldValue.serverTimestamp()
         )
 
-        if (!existingDoc.exists()) {
-            payload["createdAt"] = FieldValue.serverTimestamp()
-        } else {
-            existingDoc.getTimestamp("createdAt")?.let { payload["createdAt"] = it }
+        if (profile.activeGroupId.isNotBlank()) {
+            payload["activeGroupId"] = profile.activeGroupId
+        }
+        if (profile.joinedGroupIds.isNotEmpty()) {
+            payload["joinedGroupIds"] = profile.joinedGroupIds
         }
 
-        docRef.set(payload).await()
+        docRef.set(payload, com.google.firebase.firestore.SetOptions.merge()).await()
         Unit
     }.onFailure { handleFirestoreError(it as Exception, OperationType.WRITE, "users/${auth.currentUser?.uid}") }
 
@@ -121,16 +196,49 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
     suspend fun createGroup(name: String, customCode: String? = null): Result<FamilyGroup> = runCatching {
         val uid = requireUserId()
-        val groupId = UUID.randomUUID().toString()
-        val rawCode = (customCode?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
-            ?: ("FAM-" + (1000 + (Math.random() * 9000).toInt())))
-        val cleanCode = rawCode.replace("[^A-Z0-9-]".toRegex(), "")
+        val groupName = name.trim().take(100)
+        if (groupName.isBlank()) {
+            throw IllegalArgumentException("Bitte gib einen Gruppennamen ein.")
+        }
 
+        val hasCustomCode = !customCode.isNullOrBlank()
+        var chosenCode = ""
+
+        if (hasCustomCode) {
+            val cleaned = customCode!!.trim().uppercase().replace("[^A-Z0-9-]".toRegex(), "")
+            if (cleaned.length !in 3..30) {
+                throw IllegalArgumentException("Der Sync-Code muss zwischen 3 und 30 Zeichen (A-Z, 0-9, -) lang sein.")
+            }
+            val existingCodeDoc = db.collection("group_codes").document(cleaned).get().await()
+            if (existingCodeDoc.exists()) {
+                val linkedGroupId = existingCodeDoc.getString("groupId").orEmpty()
+                val linkedGroupExists = linkedGroupId.isNotBlank() &&
+                    db.collection("groups").document(linkedGroupId).get().await().exists()
+                if (linkedGroupExists) {
+                    throw IllegalArgumentException("Der Sync-Code '$cleaned' ist bereits vergeben. Bitte wähle einen anderen.")
+                }
+            }
+            chosenCode = cleaned
+        } else {
+            for (attempt in 0 until 6) {
+                val candidate = "FAM-" + (1000 + (Math.random() * 9000).toInt())
+                val existingCodeDoc = db.collection("group_codes").document(candidate).get().await()
+                if (!existingCodeDoc.exists()) {
+                    chosenCode = candidate
+                    break
+                }
+            }
+            if (chosenCode.isBlank()) {
+                chosenCode = "FAM-" + UUID.randomUUID().toString().take(6).uppercase()
+            }
+        }
+
+        val groupId = UUID.randomUUID().toString()
         val groupDocRef = db.collection("groups").document(groupId)
         val groupPayload = mapOf(
             "id" to groupId,
-            "name" to name.trim().ifBlank { "Meine Familie" },
-            "code" to cleanCode,
+            "name" to groupName,
+            "code" to chosenCode,
             "ownerId" to uid,
             "memberUids" to listOf(uid),
             "deviceGroups" to emptyList<String>(),
@@ -140,45 +248,22 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
         groupDocRef.set(groupPayload).await()
 
         // Also register code in group_codes lookup directory
-        val codeDocRef = db.collection("group_codes").document(cleanCode)
+        val codeDocRef = db.collection("group_codes").document(chosenCode)
         val codePayload = mapOf(
-            "code" to cleanCode,
+            "code" to chosenCode,
             "groupId" to groupId,
-            "name" to name.trim().ifBlank { "Meine Familie" },
+            "name" to groupName,
             "createdAt" to FieldValue.serverTimestamp()
         )
         codeDocRef.set(codePayload).await()
 
-        // Update user profile activeGroupId and joinedGroupIds
-        val userDoc = db.collection("users").document(uid).get().await()
-        if (userDoc.exists()) {
-            val currentJoined = userDoc.get("joinedGroupIds") as? List<*> ?: emptyList<String>()
-            val updatedJoined = (currentJoined.mapNotNull { it?.toString() } + groupId).distinct()
-            db.collection("users").document(uid).update(
-                mapOf(
-                    "activeGroupId" to groupId,
-                    "joinedGroupIds" to updatedJoined,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
-        } else {
-            db.collection("users").document(uid).set(
-                mapOf(
-                    "userId" to uid,
-                    "displayName" to (auth.currentUser?.displayName ?: "Familienmitglied"),
-                    "email" to (auth.currentUser?.email ?: ""),
-                    "activeGroupId" to groupId,
-                    "joinedGroupIds" to listOf(groupId),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
-        }
+        // Attach group to user profile without overwriting displayName or other joined groups
+        attachGroupToUserProfile(uid, groupId)
 
         FamilyGroup(
             id = groupId,
-            name = name,
-            code = cleanCode,
+            name = groupName,
+            code = chosenCode,
             ownerId = uid,
             memberUids = listOf(uid),
             deviceGroups = emptyList()
@@ -272,7 +357,11 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
     suspend fun joinGroupByCode(code: String): Result<FamilyGroup> = runCatching {
         val uid = requireUserId()
-        val cleanCode = code.trim().uppercase()
+        val cleanCode = code.trim().uppercase().replace("[^A-Z0-9-]".toRegex(), "")
+        if (cleanCode.length !in 3..30) {
+            throw IllegalArgumentException("Bitte gib einen gültigen Sync-Code (mindestens 3 Zeichen) ein.")
+        }
+
         val codeDoc = db.collection("group_codes").document(cleanCode).get().await()
         if (!codeDoc.exists()) {
             throw IllegalArgumentException("Keine Gruppe mit dem Code '$cleanCode' gefunden. Bitte prüfe den Code.")
@@ -289,46 +378,27 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
         val currentMembers = (groupDoc.get("memberUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         val updatedMembers = if (uid !in currentMembers) {
-            val nextList = currentMembers + uid
             groupDocRef.update(
                 mapOf(
-                    "memberUids" to nextList,
+                    "memberUids" to FieldValue.arrayUnion(uid),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
-            nextList
+            currentMembers + uid
         } else {
             currentMembers
         }
 
-        // Update user profile
-        val userDoc = db.collection("users").document(uid).get().await()
-        if (userDoc.exists()) {
-            val currentJoined = (userDoc.get("joinedGroupIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-            val updatedJoined = (currentJoined + targetGroupId).distinct()
-            db.collection("users").document(uid).update(
-                mapOf(
-                    "activeGroupId" to targetGroupId,
-                    "joinedGroupIds" to updatedJoined,
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
-        } else {
-            db.collection("users").document(uid).set(
-                mapOf(
-                    "userId" to uid,
-                    "displayName" to (auth.currentUser?.displayName ?: "Familienmitglied"),
-                    "email" to (auth.currentUser?.email ?: ""),
-                    "activeGroupId" to targetGroupId,
-                    "joinedGroupIds" to listOf(targetGroupId),
-                    "createdAt" to FieldValue.serverTimestamp(),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-            ).await()
-        }
+        // Attach group to user profile without overwriting displayName or other joined groups
+        attachGroupToUserProfile(uid, targetGroupId)
 
         val groupObj = groupDoc.toObject(FamilyGroup::class.java)
-        groupObj?.copy(memberUids = updatedMembers) ?: FamilyGroup(id = targetGroupId, name = codeDoc.getString("name") ?: "", code = cleanCode, memberUids = updatedMembers)
+        groupObj?.copy(memberUids = updatedMembers) ?: FamilyGroup(
+            id = targetGroupId,
+            name = codeDoc.getString("name") ?: "Familie",
+            code = cleanCode,
+            memberUids = updatedMembers
+        )
     }.onFailure { handleFirestoreError(it as Exception, OperationType.UPDATE, "groups/join") }
 
     suspend fun deleteGroup(groupId: String): Result<Unit> = runCatching {
@@ -392,6 +462,9 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
 
         val currentMembers = (groupDoc.get("memberUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         val nextMembers = currentMembers.filterNot { it == uid }
+        if (nextMembers.isEmpty()) {
+            throw IllegalStateException("Als letztes Mitglied kannst du die Gruppe nicht verlassen. Bitte lösche die Gruppe stattdessen.")
+        }
 
         groupDocRef.update(
             mapOf(
@@ -666,7 +739,7 @@ class MaintenanceRepository(private val db: FirebaseFirestore) {
                 put("completedDate", doc.getString("completedDate") ?: "")
                 put("nextScheduledDate", doc.getString("nextScheduledDate") ?: "")
                 put("performedBy", doc.getString("performedBy") ?: "")
-                put("cost", doc.getDouble("cost") ?: 0.0)
+                put("cost", (doc.get("cost") as? Number)?.toDouble() ?: 0.0)
                 put("notes", doc.getString("notes") ?: "")
             }
             maintArr.put(m)

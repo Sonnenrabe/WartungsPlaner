@@ -19,30 +19,26 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     function isValidUserProfile(data) {
       return data.userId is string && data.userId.size() <= 128 &&
-             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
              (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
              (!('activeGroupId' in data) || (data.activeGroupId is string && data.activeGroupId.size() <= 128)) &&
              (!('joinedGroupIds' in data) || (data.joinedGroupIds is list && data.joinedGroupIds.size() <= 50));
     }
 
     function isValidGroup(data) {
-      return data.id is string && data.id.size() <= 128 &&
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128)) &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
-             data.code is string && data.code.size() >= 4 && data.code.size() <= 20 &&
+             data.code is string && data.code.size() >= 3 && data.code.size() <= 30 &&
              data.ownerId is string && data.ownerId.size() <= 128 &&
-             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 30 &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 50 &&
              (data.memberUids.size() == 0 || data.memberUids[0] is string) &&
              (!('deviceGroups' in data) || (data.deviceGroups is list && data.deviceGroups.size() <= 50));
     }
 
     function isValidGroupCode(data) {
-      return data.code is string && data.code.size() >= 4 && data.code.size() <= 20 &&
+      return data.code is string && data.code.size() >= 3 && data.code.size() <= 30 &&
              data.groupId is string && data.groupId.size() <= 128 &&
              data.name is string && data.name.size() <= 100;
     }
@@ -54,7 +50,7 @@ service cloud.firestore {
     }
 
     function isValidMachine(data) {
-      return data.id is string && data.id.size() <= 128 &&
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128)) &&
              data.groupId is string && data.groupId.size() <= 128 &&
              data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
              data.category is string && data.category.size() <= 60 &&
@@ -70,7 +66,7 @@ service cloud.firestore {
     }
 
     function isValidMaintenance(data) {
-      return data.id is string && data.id.size() <= 128 &&
+      return (!('id' in data) || (data.id is string && data.id.size() <= 128)) &&
              data.groupId is string && data.groupId.size() <= 128 &&
              data.machineId is string && data.machineId.size() <= 128 &&
              data.machineName is string && data.machineName.size() <= 120 &&
@@ -85,60 +81,41 @@ service cloud.firestore {
              data.createdBy is string && data.createdBy.size() <= 128;
     }
 
-    // User Profiles
+    // User Profiles: user can only read/write their own profile
     match /users/{userId} {
       allow get: if isSignedIn() && (resource == null || request.auth.uid == userId);
       allow list, delete: if isSignedIn() && request.auth.uid == userId;
 
-      allow create: if isSignedIn() &&
-                       request.auth.uid == userId &&
-                       incoming().userId == request.auth.uid &&
-                       incoming().createdAt is timestamp &&
-                       incoming().createdAt <= request.time &&
-                       isValidUserProfile(incoming());
-
-      allow update: if isSignedIn() &&
-                       request.auth.uid == userId &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       incoming().updatedAt is timestamp &&
-                       incoming().updatedAt <= request.time &&
-                       isValidUserProfile(incoming()) &&
-                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'activeGroupId', 'joinedGroupIds', 'updatedAt']);
+      allow create, update: if isSignedIn() &&
+                               request.auth.uid == userId &&
+                               incoming().userId == request.auth.uid &&
+                               isValidUserProfile(incoming());
     }
 
     // Family Groups
     match /groups/{groupId} {
-      // Any signed-in user can get a group by direct ID (needed to lookup group info when joining via sync code)
+      // Any signed-in user can get group details (for joining via code)
       allow get: if isSignedIn();
-      // Only members can list their groups
+      // Only members can list their groups via whereArrayContains
       allow list: if isSignedIn() && (request.auth.uid in resource.data.memberUids);
 
       allow create: if isSignedIn() &&
                        incoming().ownerId == request.auth.uid &&
                        (request.auth.uid in incoming().memberUids) &&
-                       incoming().createdAt is timestamp &&
-                       incoming().createdAt <= request.time &&
                        isValidGroup(incoming());
 
-      allow update: if isSignedIn() && isValidGroup(incoming()) && incoming().createdAt == existing().createdAt && incoming().updatedAt is timestamp && incoming().updatedAt <= request.time && (
-        // Action 1: Owner updates group settings (name, code, memberUids, deviceGroups, updatedAt)
-        (existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'code', 'memberUids', 'deviceGroups', 'updatedAt'])) ||
-        // Action 2: Any group member updates custom device groups
-        ((request.auth.uid in existing().memberUids) && incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['deviceGroups', 'updatedAt'])) ||
-        // Action 3: New member joins using sync code
-        (incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+      allow update: if isSignedIn() && isValidGroup(incoming()) && (
+        // Action 1: Owner updates settings or device groups
+        (existing().ownerId == request.auth.uid) ||
+        // Action 2: Existing member updates device groups or leaves (cannot change ownerId)
+        ((request.auth.uid in existing().memberUids) &&
+         incoming().ownerId == existing().ownerId) ||
+        // Action 3: New member joins by adding their UID without modifying core metadata
+        ((request.auth.uid in incoming().memberUids) &&
          incoming().memberUids.hasAll(existing().memberUids) &&
-         (request.auth.uid in incoming().memberUids)) ||
-        // Action 4: Member leaves group
-        (incoming().ownerId == existing().ownerId && incoming().code == existing().code &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
-         existing().memberUids.hasAll(incoming().memberUids) &&
-         !(request.auth.uid in incoming().memberUids) &&
-         (request.auth.uid in existing().memberUids))
+         incoming().ownerId == existing().ownerId &&
+         incoming().code == existing().code &&
+         incoming().name == existing().name)
       );
 
       allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
@@ -151,20 +128,12 @@ service cloud.firestore {
 
         allow create: if isSignedIn() &&
                          isGroupMember(groupId) &&
-                         incoming().createdBy == request.auth.uid &&
                          incoming().groupId == groupId &&
-                         incoming().createdAt is timestamp &&
-                         incoming().createdAt <= request.time &&
                          isValidMachine(incoming());
 
         allow update: if isSignedIn() &&
                          isGroupMember(groupId) &&
-                         incoming().groupId == existing().groupId &&
-                         incoming().createdAt == existing().createdAt &&
-                         incoming().updatedAt is timestamp &&
-                         incoming().updatedAt <= request.time &&
-                         isValidMachine(incoming()) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'groupTag', 'location', 'notes', 'nextDueDate', 'nextDueMaintenance', 'lastMaintenanceDate', 'tasks', 'memberUids', 'updatedAt']);
+                         isValidMachine(incoming());
 
         allow delete: if isSignedIn() && isGroupMember(groupId);
       }
@@ -177,21 +146,12 @@ service cloud.firestore {
 
         allow create: if isSignedIn() &&
                          isGroupMember(groupId) &&
-                         incoming().createdBy == request.auth.uid &&
                          incoming().groupId == groupId &&
-                         incoming().createdAt is timestamp &&
-                         incoming().createdAt <= request.time &&
                          isValidMaintenance(incoming());
 
         allow update: if isSignedIn() &&
                          isGroupMember(groupId) &&
-                         incoming().groupId == existing().groupId &&
-                         incoming().machineId == existing().machineId &&
-                         incoming().createdAt == existing().createdAt &&
-                         incoming().updatedAt is timestamp &&
-                         incoming().updatedAt <= request.time &&
-                         isValidMaintenance(incoming()) &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['machineName', 'title', 'type', 'completedDate', 'nextScheduledDate', 'performedBy', 'cost', 'notes', 'memberUids', 'updatedAt']);
+                         isValidMaintenance(incoming());
 
         allow delete: if isSignedIn() && isGroupMember(groupId);
       }
@@ -202,12 +162,14 @@ service cloud.firestore {
       allow get: if isSignedIn();
       allow list: if false; // Disallow scraping entire code database
 
-      allow create: if isSignedIn() &&
-                       incoming().createdAt is timestamp &&
-                       incoming().createdAt <= request.time &&
-                       isValidGroupCode(incoming());
+      allow create: if isSignedIn() && isValidGroupCode(incoming());
 
-      allow update, delete: if isSignedIn() && (
+      allow update: if isSignedIn() && isValidGroupCode(incoming()) && (
+        !exists(/databases/$(database)/documents/groups/$(existing().groupId)) ||
+        get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid
+      );
+
+      allow delete: if isSignedIn() && (
         !exists(/databases/$(database)/documents/groups/$(existing().groupId)) ||
         get(/databases/$(database)/documents/groups/$(existing().groupId)).data.ownerId == request.auth.uid
       );

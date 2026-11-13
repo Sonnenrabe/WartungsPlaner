@@ -178,8 +178,59 @@ class MaintenanceRepositoryRuleTest : FirestoreEmulatorTestBase() {
     assertEquals("Ölwechsel 5W-30", loaded.tasks[0].title)
   }
 
+  @Test
+  fun joinGroupByCode_secondUser_joinsObservesAndPreservesCustomProfileName() = runBlocking {
+    val aliceUid = signInTestUser(ALICE_EMAIL)
+    val aliceRepo = MaintenanceRepository(firestore)
+    aliceRepo.ensureUserProfileExists(aliceUid).getOrThrow()
+    val customCode = "TEST-${UUID.randomUUID().toString().take(4).uppercase()}"
+    val createdGroup = withTimeout(DEFAULT_TIMEOUT_MS) {
+      aliceRepo.createGroup("Familie Test", customCode).getOrThrow()
+    }
+
+    val bobUid = signInTestUser(BOB_EMAIL)
+    val bobRepo = MaintenanceRepository(firestore)
+    bobRepo.ensureUserProfileExists(bobUid).getOrThrow()
+    bobRepo.saveUserProfile(
+      com.example.data.model.UserProfile(
+        userId = bobUid,
+        displayName = "Onkel Bob",
+        email = BOB_EMAIL
+      )
+    ).getOrThrow()
+
+    // Bob joins Alice's group via code
+    val joinedGroup = withTimeout(DEFAULT_TIMEOUT_MS) {
+      bobRepo.joinGroupByCode(customCode).getOrThrow()
+    }
+    assertEquals(createdGroup.id, joinedGroup.id)
+    assertTrue(joinedGroup.memberUids.contains(bobUid))
+
+    // ensureUserProfileExists must NOT overwrite Bob's custom displayName
+    bobRepo.ensureUserProfileExists(bobUid).getOrThrow()
+    val bobProfile = withTimeout(DEFAULT_TIMEOUT_MS) {
+      bobRepo.observeUserProfile(bobUid).first { it != null }
+    }
+    assertNotNull(bobProfile)
+    assertEquals("Onkel Bob", bobProfile!!.displayName)
+    assertTrue(bobProfile.joinedGroupIds.contains(createdGroup.id))
+
+    // Bob can observe his joined groups via whereArrayContains
+    val bobGroups = withTimeout(DEFAULT_TIMEOUT_MS) {
+      bobRepo.observeUserGroups(bobUid).first { list -> list.any { it.id == createdGroup.id } }
+    }
+    assertTrue(bobGroups.any { it.code == customCode })
+
+    // Bob leaves the group cleanly
+    val leaveRes = withTimeout(DEFAULT_TIMEOUT_MS) {
+      bobRepo.leaveGroup(createdGroup.id)
+    }
+    assertTrue(leaveRes.isSuccess)
+  }
+
   private companion object {
     const val ALICE_EMAIL = "alice_rule@test.com"
+    const val BOB_EMAIL = "bob_rule@test.com"
     const val DEFAULT_TIMEOUT_MS = 6000L
   }
 }
